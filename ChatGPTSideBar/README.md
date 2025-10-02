@@ -52,7 +52,7 @@ The goal is to make ChatGPT feel like a native part of the operating system rath
 
 1. Clone this repository:
    ```bash
-   git clone https://github.com/<your-username>/chatgpt-sidebar.git
+   git clone https://github.com/gavinmcutler/chatgpt-sidebar.git
    cd chatgpt-sidebar
 
 ---
