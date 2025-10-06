@@ -7,6 +7,7 @@
 # python chatgpt_sidebar.py                # embedded webview (default)
 # python chatgpt_sidebar.py --native-app   # dock installed ChatGPT window instead
 # python chatgpt_sidebar.py --width 480 --url https://chat.openai.com/
+# python chatgpt_sidebar.py --enable-logging  # enable logging to console and file
 
 # Standard library imports
 import argparse
@@ -34,16 +35,29 @@ from PySide6.QtWidgets import (
 
 # ---------------- Logging Setup ----------------
 
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.StreamHandler(),
-        logging.FileHandler('chatgpt_sidebar.log', mode='a')
-    ]
-)
+# Configure logging (will be enabled/disabled based on command line argument)
 logger = logging.getLogger(__name__)
+
+def setup_logging(enable_logging: bool = False) -> None:
+    """Setup logging configuration.
+    
+    Args:
+        enable_logging: Whether to enable logging to console and file
+    """
+    if enable_logging:
+        logging.basicConfig(
+            level=logging.INFO,
+            format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+            handlers=[
+                logging.StreamHandler(),
+                logging.FileHandler('chatgpt_sidebar.log', mode='a')
+            ]
+        )
+        logger.info("Logging enabled")
+    else:
+        # Disable all logging by setting level to CRITICAL
+        logging.disable(logging.CRITICAL)
+        logger.info("Logging disabled")
 
 # ---------------- Constants ----------------
 
@@ -1205,7 +1219,15 @@ def main() -> None:
         default="ChatGPT", 
         help="Window title to look for when docking the installed app"
     )
+    parser.add_argument(
+        "--enable-logging", 
+        action="store_true", 
+        help="Enable logging to console and file (disabled by default)"
+    )
     args = parser.parse_args()
+    
+    # Setup logging based on command line argument
+    setup_logging(args.enable_logging)
 
     app = QApplication(sys.argv)
     
