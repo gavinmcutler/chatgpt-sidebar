@@ -255,12 +255,12 @@ class ThemeManager:
             QPushButton {{
                 background-color: transparent;
                 border: none;
-                border-radius: 6px;
-                padding: 6px;
-                min-width: 28px;
-                min-height: 28px;
-                max-width: 32px;
-                max-height: 32px;
+                border-radius: 4px;
+                padding: 4px;
+                min-width: 22px;
+                min-height: 22px;
+                max-width: 26px;
+                max-height: 26px;
             }}
             QPushButton:hover {{
                 background-color: {colors['hover']};
@@ -332,7 +332,7 @@ class ThemeManager:
     @staticmethod
     def create_text_icon(icon_type: str, colors: Dict[str, str]) -> QIcon:
         """Create a simple geometric icon as fallback."""
-        pixmap = QtGui.QPixmap(24, 24)
+        pixmap = QtGui.QPixmap(20, 20)
         pixmap.fill(QtCore.Qt.transparent)
         
         painter = QtGui.QPainter(pixmap)
@@ -343,38 +343,38 @@ class ThemeManager:
         painter.setPen(pen)
         painter.setBrush(QtGui.QColor(colors['fg']))
         
-        center_x, center_y = 12, 12
+        center_x, center_y = 10, 10
         
         if icon_type == 'left':
             # Draw left arrow
             painter.drawPolygon([
-                QtCore.QPoint(center_x + 4, center_y - 6),
-                QtCore.QPoint(center_x - 4, center_y),
-                QtCore.QPoint(center_x + 4, center_y + 6)
+                QtCore.QPoint(center_x + 3, center_y - 5),
+                QtCore.QPoint(center_x - 3, center_y),
+                QtCore.QPoint(center_x + 3, center_y + 5)
             ])
         elif icon_type == 'right':
             # Draw right arrow
             painter.drawPolygon([
-                QtCore.QPoint(center_x - 4, center_y - 6),
-                QtCore.QPoint(center_x + 4, center_y),
-                QtCore.QPoint(center_x - 4, center_y + 6)
+                QtCore.QPoint(center_x - 3, center_y - 5),
+                QtCore.QPoint(center_x + 3, center_y),
+                QtCore.QPoint(center_x - 3, center_y + 5)
             ])
         elif icon_type == 'dock':
             # Draw maximize icon (square)
-            painter.drawRect(center_x - 6, center_y - 6, 12, 12)
+            painter.drawRect(center_x - 5, center_y - 5, 10, 10)
         elif icon_type == 'undock':
             # Draw restore icon (overlapping squares)
-            painter.drawRect(center_x - 4, center_y - 4, 8, 8)
-            painter.drawRect(center_x - 2, center_y - 2, 8, 8)
+            painter.drawRect(center_x - 3, center_y - 3, 7, 7)
+            painter.drawRect(center_x - 1, center_y - 1, 7, 7)
         elif icon_type == 'exit':
             # Draw X
-            painter.drawLine(center_x - 5, center_y - 5, center_x + 5, center_y + 5)
-            painter.drawLine(center_x + 5, center_y - 5, center_x - 5, center_y + 5)
+            painter.drawLine(center_x - 4, center_y - 4, center_x + 4, center_y + 4)
+            painter.drawLine(center_x + 4, center_y - 4, center_x - 4, center_y + 4)
         elif icon_type == 'camera':
             # Draw camera icon
-            painter.drawEllipse(center_x - 6, center_y - 4, 12, 8)
-            painter.drawRect(center_x - 2, center_y + 2, 4, 3)
-            painter.drawEllipse(center_x - 3, center_y - 2, 6, 4)
+            painter.drawEllipse(center_x - 5, center_y - 3, 10, 7)
+            painter.drawRect(center_x - 2, center_y + 2, 4, 2)
+            painter.drawEllipse(center_x - 2, center_y - 2, 5, 4)
         
         painter.end()
         return QIcon(pixmap)
@@ -685,13 +685,13 @@ class AppBarWidget(QWidget):
         """Create themed control bar with icons"""
         self.controls = QFrame(self)
         self.controls.setFrameShape(QFrame.NoFrame)
-        self.controls.setFixedHeight(40)
+        self.controls.setFixedHeight(34)
         self.controls.setStyleSheet(ThemeManager.create_control_bar_stylesheet(self.colors))
         
         # Control bar layout
         controls_layout = QHBoxLayout(self.controls)
-        controls_layout.setContentsMargins(8, 6, 8, 6)
-        controls_layout.setSpacing(6)
+        controls_layout.setContentsMargins(6, 4, 6, 4)
+        controls_layout.setSpacing(4)
         
         # Create icon buttons
         self.btnShot = QPushButton()
