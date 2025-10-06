@@ -146,6 +146,9 @@ EnumWindows = user32.EnumWindows
 GetDesktopWindow = user32.GetDesktopWindow
 ShowWindow = user32.ShowWindow
 PrintWindow = user32.PrintWindow
+MonitorFromWindow = user32.MonitorFromWindow
+GetMonitorInfoW = user32.GetMonitorInfoW
+GetSystemMetrics = user32.GetSystemMetrics
 
 class RECT(ctypes.Structure):
     _fields_ = [("left",  ctypes.c_long),
@@ -163,6 +166,12 @@ class APPBARDATA(ctypes.Structure):
                 ("uEdge", ctypes.c_uint),
                 ("rc", RECT),
                 ("lParam", ctypes.c_int)]
+
+class MONITORINFO(ctypes.Structure):
+    _fields_ = [("cbSize", ctypes.c_uint32),
+                ("rcMonitor", RECT),
+                ("rcWork", RECT),
+                ("dwFlags", ctypes.c_uint32)]
 
 def SHAppBarMessage(msg, data):
     return shell32.SHAppBarMessage(ctypes.c_uint(msg), ctypes.byref(data))
@@ -727,9 +736,10 @@ class AppBarWidget(QWidget):
         if geometry:
             self.restoreGeometry(geometry)
         else:
-            # Default size and center
+            # Default size and center - adapt to screen size
             screen = QGuiApplication.primaryScreen().availableGeometry()
-            width, height = 900, 1000
+            width = min(900, int(screen.width() * 0.8))
+            height = min(1000, int(screen.height() * 0.9))
             x = (screen.width() - width) // 2
             y = (screen.height() - height) // 2
             self.resize(width, height)
@@ -780,13 +790,16 @@ class AppBarWidget(QWidget):
         Returns:
             Tuple[int, int, int, int]: Rectangle coordinates (left, top, right, bottom)
         """
-        mon = QGuiApplication.primaryScreen().geometry()
+        # Get monitor rect using Windows API for accuracy
+        mon_rect = self._monitor_rect()
+        monitor = (mon_rect.left, mon_rect.top, mon_rect.right, mon_rect.bottom)
+        
         # Our AppBar rect after docking:
         hwnd = int(self.winId())
         r = RECT()
         GetWindowRect(hwnd, ctypes.byref(r))
         appbar = (r.left, r.top, r.right, r.bottom)
-        monitor = (mon.left(), mon.top(), mon.right(), mon.bottom())
+        
         # Return the remaining area on the opposite side
         if self.edge == AppBarEdge.LEFT:
             # right side
@@ -805,14 +818,16 @@ class AppBarWidget(QWidget):
     # ----- Mouse drag (for moving when not docked) -----
     def mousePressEvent(self, e: QtGui.QMouseEvent) -> None:
         """Handle mouse press events for dragging."""
-        if e.button() == QtCore.Qt.LeftButton:
+        # Only allow dragging when undocked
+        if e.button() == QtCore.Qt.LeftButton and not self.is_docked:
             self._drag = True
             self._drag_pos = e.globalPosition().toPoint() - self.frameGeometry().topLeft()
             e.accept()
 
     def mouseMoveEvent(self, e: QtGui.QMouseEvent) -> None:
         """Handle mouse move events for dragging."""
-        if self._drag:
+        # Only allow dragging when undocked
+        if self._drag and not self.is_docked:
             self.move((e.globalPosition().toPoint() - self._drag_pos))
             e.accept()
 
@@ -859,9 +874,35 @@ class AppBarWidget(QWidget):
         Returns:
             RECT: The monitor rectangle coordinates
         """
-        # Use full geometry for AppBar - the system will handle taskbar exclusion
-        screen = QGuiApplication.primaryScreen().geometry()
-        return RECT(screen.left(), screen.top(), screen.right(), screen.bottom())
+        # Use Windows API to get accurate monitor info
+        hwnd = int(self.winId())
+        
+        # Get the monitor this window is on (MONITOR_DEFAULTTONEAREST = 2)
+        hMonitor = MonitorFromWindow(hwnd, 2)
+        
+        if hMonitor:
+            # Get monitor info
+            mi = MONITORINFO()
+            mi.cbSize = ctypes.sizeof(MONITORINFO)
+            
+            if GetMonitorInfoW(hMonitor, ctypes.byref(mi)):
+                # Use rcMonitor for full screen dimensions (not rcWork which excludes taskbar)
+                logger.info(f"Monitor rect: left={mi.rcMonitor.left}, top={mi.rcMonitor.top}, "
+                           f"right={mi.rcMonitor.right}, bottom={mi.rcMonitor.bottom}")
+                return mi.rcMonitor
+        
+        # Fallback to Qt if Windows API fails
+        try:
+            screen = self.screen()
+            if screen is None:
+                screen = QGuiApplication.primaryScreen()
+        except:
+            screen = QGuiApplication.primaryScreen()
+        
+        geometry = screen.geometry()
+        logger.info(f"Fallback Qt geometry: {geometry.left()}, {geometry.top()}, "
+                   f"{geometry.right()}, {geometry.bottom()}")
+        return RECT(geometry.left(), geometry.top(), geometry.right(), geometry.bottom())
 
     def _dock(self) -> None:
         """Dock the AppBar to the specified edge with the desired width."""
@@ -873,25 +914,37 @@ class AppBarWidget(QWidget):
         abd.uEdge = self.edge
         abd.rc = rect
 
+        # Store the original screen bounds
+        screen_left = rect.left
+        screen_top = rect.top
+        screen_right = rect.right
+        screen_bottom = rect.bottom
+
         # Propose width from saved desired_width, keep full height
         if self.edge == AppBarEdge.LEFT:
-            abd.rc.right = abd.rc.left + int(self.desired_width)
-        else:
-            abd.rc.left = abd.rc.right - int(self.desired_width)
-        # Ensure full height is maintained
-        abd.rc.top = rect.top
-        abd.rc.bottom = rect.bottom
+            abd.rc.left = screen_left
+            abd.rc.right = screen_left + int(self.desired_width)
+        else:  # RIGHT
+            abd.rc.left = screen_right - int(self.desired_width)
+            abd.rc.right = screen_right
+        
+        # Always use full screen height
+        abd.rc.top = screen_top
+        abd.rc.bottom = screen_bottom
 
         SHAppBarMessage(AppBarMessage.QUERYPOS, abd)
 
-        # Enforce final width again before setpos, ensure full height
+        # Enforce final width again after QUERYPOS, maintaining screen edges and full height
         if self.edge == AppBarEdge.LEFT:
-            abd.rc.right = abd.rc.left + int(self.desired_width)
-        else:
-            abd.rc.left = abd.rc.right - int(self.desired_width)
-        # Re-enforce full height after query
-        abd.rc.top = rect.top
-        abd.rc.bottom = rect.bottom
+            abd.rc.left = screen_left
+            abd.rc.right = screen_left + int(self.desired_width)
+        else:  # RIGHT
+            abd.rc.left = screen_right - int(self.desired_width)
+            abd.rc.right = screen_right
+        
+        # Re-enforce full height from screen bounds
+        abd.rc.top = screen_top
+        abd.rc.bottom = screen_bottom
 
         SHAppBarMessage(AppBarMessage.SETPOS, abd)
 
@@ -1017,9 +1070,10 @@ class AppBarWidget(QWidget):
         if geometry:
             self.restoreGeometry(geometry)
         else:
-            # Default size and center for first time undocking
+            # Default size and center for first time undocking - adapt to screen size
             screen = QGuiApplication.primaryScreen().availableGeometry()
-            width, height = 900, AppConstants.DEFAULT_HEIGHT
+            width = min(900, int(screen.width() * 0.8))
+            height = min(1000, int(screen.height() * 0.9))
             x = (screen.width() - width) // 2
             y = (screen.height() - height) // 2
             self.resize(width, height)
