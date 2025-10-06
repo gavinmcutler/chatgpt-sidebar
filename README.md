@@ -8,19 +8,19 @@ The goal is to make ChatGPT feel like a native part of the operating system rath
 
 ## Demonstration
 
-![Sidebar screenshot](ChatGPTSideBar/assets/img1.png)  
+![Sidebar screenshot](assets/img1.png)  
 *The ChatGPT sidebar docked on the desktop.*
 
-![Docking demo – left and right edges](ChatGPTSideBar/assets/gif1.gif)  
+![Docking demo – left and right edges](assets/gif1.gif)  
 *Docking the sidebar to the left and right edges of the screen while desktop icons automatically adjust.*
 
-![Fullscreen usage with other applications](ChatGPTSideBar/assets/gif2.gif)  
+![Fullscreen usage with other applications](assets/gif2.gif)  
 *Running applications in fullscreen mode while the ChatGPT sidebar remains docked.*
 
-![Switching between docked and windowed mode](ChatGPTSideBar/assets/gif3.gif)  
+![Switching between docked and windowed mode](assets/gif3.gif)  
 *Toggling between docked mode and standalone window mode.*
 
-![Screenshot-to-chat feature](ChatGPTSideBar/assets/gif4.gif)  
+![Screenshot-to-chat feature](assets/gif4.gif)  
 *Capturing another application window and inserting the screenshot directly into the ChatGPT conversation.*
 
 ## Features
