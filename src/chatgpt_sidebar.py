@@ -1102,7 +1102,13 @@ class AppBarWidget(QWidget):
     
     def _redock_appbar(self) -> None:
         """Convert from normal window back to docked AppBar."""
-        # Save current undocked geometry before switching
+        # Explicitly restore from maximized state if needed
+        if self.isMaximized():
+            self.showNormal()
+            # Give the window system time to restore the window
+            QApplication.processEvents()
+        
+        # Save current undocked geometry before switching (now in normal state)
         self.settings.setValue("undocked_geometry", self.saveGeometry())
         
         # Go frameless/topmost as sidebar
@@ -1122,8 +1128,20 @@ class AppBarWidget(QWidget):
         self._registered = True
         self.is_docked = True
         
-        # Dock using the saved desired_width
+        # Dock using the saved desired_width (this handles all sizing correctly)
         self._dock()
+        
+        # Force webview to refresh after docking (window flag changes can affect rendering)
+        if self.has_webview and hasattr(self, 'web'):
+            def refresh_webview():
+                # Trigger a full repaint of the webview and its page
+                self.web.updateGeometry()
+                self.web.update()
+                self.web.repaint()
+                # Force layout recalculation
+                QApplication.processEvents()
+            # Small delay to let the window finish docking before refreshing
+            QtCore.QTimer.singleShot(100, refresh_webview)
         
         # Update UI and save preferences
         self._update_button_icons_and_tooltips()
