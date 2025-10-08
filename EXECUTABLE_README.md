@@ -30,9 +30,6 @@ The executable supports the same command-line arguments as the Python script:
 # Default mode (embedded webview)
 dist\ChatGPT_Sidebar.exe
 
-# Native app mode (docks installed ChatGPT app)
-dist\ChatGPT_Sidebar.exe --native-app
-
 # Custom width
 dist\ChatGPT_Sidebar.exe --width 500
 
@@ -40,7 +37,7 @@ dist\ChatGPT_Sidebar.exe --width 500
 dist\ChatGPT_Sidebar.exe --url https://chat.openai.com/
 
 # Combined options
-dist\ChatGPT_Sidebar.exe --width 480 --native-app
+dist\ChatGPT_Sidebar.exe --width 480 --url https://chat.openai.com/
 ```
 
 ### Using the Batch File
@@ -75,7 +72,7 @@ run_sidebar.bat
 ### WebView Issues
 1. Ensure internet connection is available
 2. Check firewall settings for web access
-3. Try running with `--native-app` flag to use installed ChatGPT app instead
+3. Check if you can access the ChatGPT website in your regular browser
 
 ### Performance Issues
 1. Close other resource-intensive applications

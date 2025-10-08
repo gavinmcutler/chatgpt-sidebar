@@ -1,11 +1,9 @@
 # chatgpt_sidebar.py
-# Windows-only. Creates a left-docked AppBar with an embedded webview by default.
-# Optionally docks the installed ChatGPT app with --native-app.
+# Windows-only. Creates a left-docked AppBar with an embedded webview.
 #
 # Usage:
 # pip install PySide6
-# python chatgpt_sidebar.py                # embedded webview (default)
-# python chatgpt_sidebar.py --native-app   # dock installed ChatGPT window instead
+# python chatgpt_sidebar.py
 # python chatgpt_sidebar.py --width 480 --url https://chat.openai.com/
 # python chatgpt_sidebar.py --enable-logging  # enable logging to console and file
 
@@ -113,13 +111,6 @@ class AppConstants:
     DEFAULT_TITLE = "ChatGPT Sidebar"
     TOAST_DURATION = 3000
     SCREENSHOT_TOAST_DURATION = 1500
-    
-    # Window class names for ChatGPT detection
-    CHATGPT_CLASSES = [
-        ("", "ChatGPT"),
-        ("Chrome_WidgetWin_1", None),
-        ("Chrome_WidgetWin_0", None),
-    ]
     
     # Theme color palettes
     DARK_THEME = {
@@ -452,14 +443,6 @@ class WindowCapture:
         return (r.left, r.top, r.right, r.bottom)
     
     @staticmethod
-    def find_excluded_hwnds(exclude_self: int, exclude_native_chatgpt: Optional[int] = None) -> set:
-        """Get set of HWNDs to exclude from capture."""
-        excluded = {exclude_self}
-        if exclude_native_chatgpt:
-            excluded.add(exclude_native_chatgpt)
-        return excluded
-    
-    @staticmethod
     def visible_top_window_in_rect(wr: Tuple[int, int, int, int], excluded_hwnds: set) -> int:
         """Find the top-most visible window in the given rectangle."""
         # 1) Try foreground window if it intersects and is not excluded
@@ -579,7 +562,7 @@ class AppBarWidget(QWidget):
         desired_width: int = AppConstants.DEFAULT_WIDTH, 
         edge: int = AppBarEdge.LEFT, 
         title: str = AppConstants.DEFAULT_TITLE, 
-        url_string: Optional[str] = None, 
+        url_string: str = AppConstants.DEFAULT_URL, 
         parent: Optional[QWidget] = None
     ) -> None:
         super().__init__(parent)
@@ -594,8 +577,6 @@ class AppBarWidget(QWidget):
         # Initialize state
         self._registered = False
         self._callback_msg = RegisterWindowMessageW("APPBARMSG_CHATGPT_SIDEBAR")
-        self.native_app_mode = False  # Will be set by main()
-        self.chatgpt_hwnd = None  # Will store ChatGPT window handle in native app mode
         
         # Theme and colors
         self.colors = ThemeManager.detect_theme_colors()
@@ -620,25 +601,18 @@ class AppBarWidget(QWidget):
         self._create_control_bar()
 
         # Create secure web profile for session persistence
-        if url_string:
-            self._create_web_profile()
-            self.web = QWebEngineView(self)
-            page = QWebEnginePage(self.profile, self.web)
-            self.web.setPage(page)
-            self.web.setUrl(QtCore.QUrl(url_string))
-            self.v.addWidget(self.web, 1)  # webview fills remainder
+        self._create_web_profile()
+        self.web = QWebEngineView(self)
+        page = QWebEnginePage(self.profile, self.web)
+        self.web.setPage(page)
+        self.web.setUrl(QtCore.QUrl(url_string))
+        self.v.addWidget(self.web, 1)  # webview fills remainder
         
         # Connect button signals
         self.btnShot.clicked.connect(self.on_screenshot_to_chat)
         self.btnSide.clicked.connect(self.on_toggle_side)
         self.btnDock.clicked.connect(self.on_toggle_dock)
         self.btnExit.clicked.connect(self.on_exit)
-        
-        # Store webview availability for screenshot functionality
-        self.has_webview = url_string is not None
-        
-        # Store native ChatGPT window handle for exclusion
-        self._native_chatgpt_hwnd = None
 
         # Initialize toast system
         self._toast_label = None
@@ -824,10 +798,7 @@ class AppBarWidget(QWidget):
     
     def _find_excluded_hwnds(self) -> set:
         """Get set of HWNDs to exclude from capture."""
-        return WindowCapture.find_excluded_hwnds(
-            int(self.winId()), 
-            getattr(self, '_native_chatgpt_hwnd', None)
-        )
+        return {int(self.winId())}
 
     # ----- Mouse drag (for moving when not docked) -----
     def mousePressEvent(self, e: QtGui.QMouseEvent) -> None:
@@ -1002,16 +973,10 @@ class AppBarWidget(QWidget):
         """Capture screenshot of other window and paste into chat."""
         logger.info("Screenshot button clicked - starting capture process")
         try:
-            # Check if we have a webview (not available in native-app mode without webview)
-            if not self.has_webview:
-                logger.warning("Screenshot requested but no webview available")
-                self._show_toast("Screenshot-to-chat is only available in WebView mode.")
-                return
-            
-            # 0) Determine the opposite work area rectangle
+            # Determine the opposite work area rectangle
             wr = self._other_work_area_rect()
 
-            # 1) Resolve the target HWND in that rect (exclude ourselves and native ChatGPT if present)
+            # Resolve the target HWND in that rect (exclude ourselves)
             excluded_hwnds = self._find_excluded_hwnds()
             hwnd_target = WindowCapture.visible_top_window_in_rect(wr, excluded_hwnds)
             if not hwnd_target:
@@ -1132,39 +1097,20 @@ class AppBarWidget(QWidget):
         self._dock()
         
         # Force webview to refresh after docking (window flag changes can affect rendering)
-        if self.has_webview and hasattr(self, 'web'):
-            def refresh_webview():
-                # Trigger a full repaint of the webview and its page
-                self.web.updateGeometry()
-                self.web.update()
-                self.web.repaint()
-                # Force layout recalculation
-                QApplication.processEvents()
-            # Small delay to let the window finish docking before refreshing
-            QtCore.QTimer.singleShot(100, refresh_webview)
+        def refresh_webview():
+            # Trigger a full repaint of the webview and its page
+            self.web.updateGeometry()
+            self.web.update()
+            self.web.repaint()
+            # Force layout recalculation
+            QApplication.processEvents()
+        # Small delay to let the window finish docking before refreshing
+        QtCore.QTimer.singleShot(100, refresh_webview)
         
         # Update UI and save preferences
         self._update_button_icons_and_tooltips()
         self.settings.setValue("is_docked", self.is_docked)
-        
-        # In native app mode, re-dock the ChatGPT app after AppBar is registered
-        if hasattr(self, 'native_app_mode') and self.native_app_mode:
-            QtCore.QTimer.singleShot(100, self._redock_native_app)
     
-    def _redock_native_app(self) -> None:
-        """Re-dock the native ChatGPT app to the AppBar rect."""
-        if self.chatgpt_hwnd:
-            rect = self.frameGeometry()
-            set_window_rect(self.chatgpt_hwnd, rect.x(), rect.y(), rect.width(), rect.height())
-        else:
-            # Try to find ChatGPT app again
-            hwnd_target = find_chatgpt_hwnd()
-            if hwnd_target:
-                self.chatgpt_hwnd = hwnd_target
-                self._native_chatgpt_hwnd = hwnd_target  # Store for exclusion from screenshots
-                rect = self.frameGeometry()
-                set_window_rect(hwnd_target, rect.x(), rect.y(), rect.width(), rect.height())
-
     def closeEvent(self, e: QtGui.QCloseEvent) -> None:
         """Handle application close event.
         
@@ -1184,33 +1130,6 @@ class AppBarWidget(QWidget):
         super().closeEvent(e)
         QApplication.quit()
 
-# ---------------- Helper: find & dock the existing ChatGPT app window ----------------
-
-def find_chatgpt_hwnd() -> int:
-    """
-    Try to find the ChatGPT window handle using common patterns.
-    
-    Returns:
-        int: Window handle if found, 0 otherwise
-    """
-    for cls, title in AppConstants.CHATGPT_CLASSES:
-        hwnd = FindWindowW(cls or None, title or None)
-        if hwnd:
-            return hwnd
-    return 0
-
-def set_window_rect(hwnd: int, x: int, y: int, w: int, h: int) -> None:
-    """Set the position and size of a window."""
-    SetWindowPos(
-        hwnd, 
-        HWND_TOP, 
-        x, 
-        y, 
-        w, 
-        h, 
-        WindowPos.NOACTIVATE | WindowPos.SHOWWINDOW | WindowPos.NOZORDER
-    )
-
 # ---------------- Main ----------------
 
 def main() -> None:
@@ -1223,19 +1142,9 @@ def main() -> None:
         help="Sidebar width in pixels"
     )
     parser.add_argument(
-        "--native-app", 
-        action="store_true", 
-        help="Dock the installed ChatGPT app instead of using embedded webview"
-    )
-    parser.add_argument(
         "--url", 
         default=AppConstants.DEFAULT_URL, 
         help="URL to load in embedded webview"
-    )
-    parser.add_argument(
-        "--dock-title", 
-        default="ChatGPT", 
-        help="Window title to look for when docking the installed app"
     )
     parser.add_argument(
         "--enable-logging", 
@@ -1258,44 +1167,12 @@ def main() -> None:
     signal.signal(signal.SIGTERM, signal_handler)
     
     try:
-        if args.native_app:
-            # Native app mode: create AppBar without webview, then dock ChatGPT app
-            bar = AppBarWidget(desired_width=args.width)
-            bar.native_app_mode = True  # Flag to track native app mode
-            
-            # Only show and dock if starting in docked mode
-            if bar.is_docked:
-                bar.show()
-                
-                # Try to find and dock the installed ChatGPT app
-                def dock_existing():
-                    hwnd_target = find_chatgpt_hwnd()
-                    if hwnd_target:
-                        rect = bar.frameGeometry()
-                        set_window_rect(hwnd_target, rect.x(), rect.y(), rect.width(), rect.height())
-                        bar.chatgpt_hwnd = hwnd_target  # Store hwnd for later use
-                        bar._native_chatgpt_hwnd = hwnd_target  # Store for exclusion from screenshots
-                    else:
-                        # Retry a few times in case user opens it late
-                        QtCore.QTimer.singleShot(1500, dock_existing)
-                QtCore.QTimer.singleShot(500, dock_existing)
-            else:
-                # Start undocked - already handled by _start_undocked()
-                pass
-        else:
-            # Default mode: embedded webview
-            try:
-                bar = AppBarWidget(desired_width=args.width, url_string=args.url)
-                bar.native_app_mode = False
-                
-                # Only show if starting in docked mode (undocked mode handled by _start_undocked)
-                if bar.is_docked:
-                    bar.show()
-            except Exception as e:
-                logger.error(f"Failed to create webview: {e}")
-                QtWidgets.QMessageBox.critical(None, "Missing dependency",
-                    f"QtWebEngine is not available. Please install PySide6 with WebEngine support.\nError: {e}")
-                sys.exit(1)
+        # Create AppBar with embedded webview
+        bar = AppBarWidget(desired_width=args.width, url_string=args.url)
+        
+        # Only show if starting in docked mode (undocked mode handled by _start_undocked)
+        if bar.is_docked:
+            bar.show()
     
     except Exception as e:
         logger.error(f"Application startup failed: {e}")

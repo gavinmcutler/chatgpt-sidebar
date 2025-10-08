@@ -7,10 +7,7 @@ echo Starting ChatGPT Sidebar...
 REM Run the executable with default settings (embedded webview)
 start "" "dist\ChatGPT_Sidebar.exe"
 
-REM Alternative commands for different modes:
-REM For native app mode (docks installed ChatGPT app):
-REM start "" "dist\ChatGPT_Sidebar.exe" --native-app
-
+REM Alternative commands for custom settings:
 REM For custom width:
 REM start "" "dist\ChatGPT_Sidebar.exe" --width 500
 
