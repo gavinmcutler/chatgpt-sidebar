@@ -12,6 +12,7 @@ import argparse
 import base64
 import json
 import logging
+import math
 import os
 import pathlib
 import signal
@@ -28,7 +29,9 @@ from PySide6.QtGui import QGuiApplication, QIcon, QPalette
 from PySide6.QtWebEngineCore import QWebEnginePage, QWebEngineProfile
 from PySide6.QtWebEngineWidgets import QWebEngineView
 from PySide6.QtWidgets import (
-    QApplication, QFrame, QHBoxLayout, QLabel, QPushButton, QVBoxLayout, QWidget
+    QApplication, QFrame, QHBoxLayout, QLabel, QPushButton, QVBoxLayout, QWidget, QStackedWidget, QStyle,
+    QCheckBox, QSlider, QSpinBox, QRadioButton, QButtonGroup, QGroupBox, QFormLayout, QSpacerItem, QSizePolicy,
+    QScrollArea
 )
 
 # ---------------- Logging Setup ----------------
@@ -275,24 +278,29 @@ class ThemeManager:
         
         # Try built-in Qt icons as second fallback
         builtin_icons = {
-            'go-previous': QtGui.QIcon.StandardPixmap.SP_ArrowLeft,
-            'go-next': QtGui.QIcon.StandardPixmap.SP_ArrowRight,
-            'view-fullscreen': QtGui.QIcon.StandardPixmap.SP_TitleBarNormalButton,
-            'view-restore': QtGui.QIcon.StandardPixmap.SP_TitleBarNormalButton,
-            'window-close': QtGui.QIcon.StandardPixmap.SP_TitleBarCloseButton,
-            'camera-photo': QtGui.QIcon.StandardPixmap.SP_FileDialogDetailedView
+            'go-previous': QStyle.SP_ArrowLeft,
+            'go-next': QStyle.SP_ArrowRight,
+            'view-fullscreen': QStyle.SP_TitleBarNormalButton,
+            'view-restore': QStyle.SP_TitleBarNormalButton,
+            'window-close': QStyle.SP_TitleBarCloseButton,
+            'camera-photo': QStyle.SP_FileDialogDetailedView,
+            'settings': QStyle.SP_ComputerIcon
         }
         
         if theme_name in builtin_icons:
             # Create icon from standard pixmap
-            pixmap = QtGui.QApplication.style().standardPixmap(builtin_icons[theme_name])
+            pixmap = QApplication.style().standardPixmap(builtin_icons[theme_name])
             if not pixmap.isNull():
                 # Recolor the pixmap to match theme
                 colored_pixmap = ThemeManager.recolor_pixmap(pixmap, colors['fg'])
                 return QIcon(colored_pixmap)
         
         # Final fallback to geometric icons
-        return ThemeManager.create_text_icon(theme_name, colors)
+        try:
+            return ThemeManager.create_text_icon(theme_name, colors)
+        except:
+            # Ultimate fallback to simple text icon
+            return ThemeManager.create_text_icon_simple(theme_name, colors)
     
     @staticmethod
     def recolor_pixmap(pixmap: QtGui.QPixmap, color: str) -> QtGui.QPixmap:
@@ -366,6 +374,40 @@ class ThemeManager:
             painter.drawEllipse(center_x - 5, center_y - 3, 10, 7)
             painter.drawRect(center_x - 2, center_y + 2, 4, 2)
             painter.drawEllipse(center_x - 2, center_y - 2, 5, 4)
+        elif icon_type == 'settings':
+            # Draw simple gear/cog icon
+            # Outer circle
+            painter.drawEllipse(center_x - 4, center_y - 4, 8, 8)
+            # Inner circle
+            painter.drawEllipse(center_x - 2, center_y - 2, 4, 4)
+            # Gear teeth (simplified)
+            painter.drawRect(center_x - 1, center_y - 7, 2, 3)
+            painter.drawRect(center_x - 1, center_y + 4, 2, 3)
+            painter.drawRect(center_x - 7, center_y - 1, 3, 2)
+            painter.drawRect(center_x + 4, center_y - 1, 3, 2)
+        
+        painter.end()
+        return QIcon(pixmap)
+    
+    @staticmethod
+    def create_text_icon_simple(icon_type: str, colors: Dict[str, str]) -> QIcon:
+        """Create a very simple text-based icon as final fallback."""
+        pixmap = QtGui.QPixmap(20, 20)
+        pixmap.fill(QtCore.Qt.transparent)
+        
+        painter = QtGui.QPainter(pixmap)
+        painter.setRenderHint(QtGui.QPainter.Antialiasing)
+        
+        # Set font and color
+        font = QtGui.QFont()
+        font.setPointSize(12)
+        font.setBold(True)
+        painter.setFont(font)
+        painter.setPen(QtGui.QColor(colors['fg']))
+        
+        if icon_type == 'settings':
+            # Draw a simple "S" for Settings
+            painter.drawText(pixmap.rect(), QtCore.Qt.AlignCenter, "⚙")
         
         painter.end()
         return QIcon(pixmap)
@@ -379,7 +421,8 @@ class ThemeManager:
             'dock': ThemeManager.create_icon('view-fullscreen', 'dock', colors),
             'undock': ThemeManager.create_icon('view-restore', 'undock', colors),
             'exit': ThemeManager.create_icon('window-close', 'exit', colors),
-            'camera': ThemeManager.create_icon('camera-photo', 'camera', colors)
+            'camera': ThemeManager.create_icon('camera-photo', 'camera', colors),
+            'settings': ThemeManager.create_icon('settings', 'settings', colors)
         }
 
 # ---------------- JavaScript helpers for screenshot functionality ----------------
@@ -606,10 +649,19 @@ class AppBarWidget(QWidget):
         page = QWebEnginePage(self.profile, self.web)
         self.web.setPage(page)
         self.web.setUrl(QtCore.QUrl(url_string))
-        self.v.addWidget(self.web, 1)  # webview fills remainder
+        
+        # Create stacked widget to switch between webview and settings
+        self.stacked_widget = QStackedWidget(self)
+        self.stacked_widget.addWidget(self.web)  # index 0: webview
+        
+        # Create settings view placeholder (will be created later)
+        self.settings_view = None
+        
+        self.v.addWidget(self.stacked_widget, 1)  # stacked widget fills remainder
         
         # Connect button signals
         self.btnShot.clicked.connect(self.on_screenshot_to_chat)
+        self.btnSettings.clicked.connect(self.on_show_settings)
         self.btnSide.clicked.connect(self.on_toggle_side)
         self.btnDock.clicked.connect(self.on_toggle_dock)
         self.btnExit.clicked.connect(self.on_exit)
@@ -655,6 +707,416 @@ class AppBarWidget(QWidget):
             logger.error(f"Failed to create web profile: {e}")
             raise
     
+    def _create_settings_view(self) -> None:
+        """Create the settings view with back button and title."""
+        self.settings_view = QWidget()
+        settings_layout = QVBoxLayout(self.settings_view)
+        settings_layout.setContentsMargins(0, 0, 0, 0)
+        settings_layout.setSpacing(0)
+        
+        # Create header with back button and title
+        header = QFrame()
+        header.setFixedHeight(50)
+        header.setStyleSheet(f"""
+            QFrame {{
+                background-color: {self.colors['panel']};
+                border-bottom: 1px solid {self.colors['border']};
+            }}
+        """)
+        
+        header_layout = QHBoxLayout(header)
+        header_layout.setContentsMargins(10, 10, 10, 10)
+        header_layout.setSpacing(10)
+        
+        # Back button
+        self.btnBack = QPushButton()
+        self.btnBack.setIcon(self.icons['left'])
+        self.btnBack.setToolTip("Back to chat")
+        self.btnBack.setFixedSize(30, 30)
+        self.btnBack.setStyleSheet(f"""
+            QPushButton {{
+                background-color: transparent;
+                border: none;
+                border-radius: 4px;
+                padding: 4px;
+            }}
+            QPushButton:hover {{
+                background-color: {self.colors['hover']};
+            }}
+            QPushButton:pressed {{
+                background-color: {self.colors['pressed']};
+            }}
+        """)
+        self.btnBack.clicked.connect(self.on_back_to_chat)
+        
+        # Settings title
+        settings_title = QLabel("Settings")
+        settings_title.setStyleSheet(f"""
+            QLabel {{
+                color: {self.colors['fg']};
+                font-size: 18px;
+                font-weight: bold;
+            }}
+        """)
+        
+        header_layout.addWidget(self.btnBack)
+        header_layout.addWidget(settings_title)
+        header_layout.addStretch()
+        
+        settings_layout.addWidget(header)
+        
+        # Content area with scrollable settings
+        content_area = QWidget()
+        content_area.setStyleSheet(f"""
+            QWidget {{
+                background-color: {self.colors['bg']};
+            }}
+        """)
+        
+        # Add scroll area to handle overflow
+        scroll_area = QScrollArea()
+        scroll_area.setWidget(content_area)
+        scroll_area.setWidgetResizable(True)
+        scroll_area.setHorizontalScrollBarPolicy(QtCore.Qt.ScrollBarAlwaysOff)
+        scroll_area.setVerticalScrollBarPolicy(QtCore.Qt.ScrollBarAsNeeded)
+        scroll_area.setStyleSheet(f"""
+            QScrollArea {{
+                border: none;
+                background-color: {self.colors['bg']};
+            }}
+            QScrollBar:vertical {{
+                background-color: {self.colors['panel']};
+                width: 8px;
+                border-radius: 4px;
+            }}
+            QScrollBar::handle:vertical {{
+                background-color: {self.colors['border']};
+                border-radius: 4px;
+                min-height: 20px;
+            }}
+            QScrollBar::handle:vertical:hover {{
+                background-color: {self.colors['accent']};
+            }}
+        """)
+        
+        content_layout = QVBoxLayout(content_area)
+        content_layout.setContentsMargins(15, 15, 15, 15)
+        content_layout.setSpacing(15)
+        
+        # Create General section
+        self._create_general_section(content_layout)
+        
+        settings_layout.addWidget(scroll_area, 1)
+    
+    def _create_general_section(self, parent_layout):
+        """Create the General settings section."""
+        # General section group
+        general_group = QGroupBox("General")
+        general_group.setStyleSheet(f"""
+            QGroupBox {{
+                color: {self.colors['fg']};
+                font-size: 14px;
+                font-weight: bold;
+                border: 1px solid {self.colors['border']};
+                border-radius: 6px;
+                margin-top: 10px;
+                padding-top: 10px;
+            }}
+            QGroupBox::title {{
+                subcontrol-origin: margin;
+                left: 10px;
+                padding: 0 5px 0 5px;
+            }}
+        """)
+        
+        general_layout = QVBoxLayout(general_group)
+        general_layout.setSpacing(12)
+        general_layout.setContentsMargins(10, 15, 10, 10)
+        
+        # Startup behavior section
+        startup_label = QLabel("Startup behavior")
+        startup_label.setStyleSheet(f"""
+            QLabel {{
+                color: {self.colors['fg']};
+                font-weight: bold;
+                font-size: 12px;
+                margin-bottom: 5px;
+            }}
+        """)
+        general_layout.addWidget(startup_label)
+        
+        # Launch on system startup checkbox
+        self.chk_launch_startup = QCheckBox("Launch on system startup")
+        self.chk_launch_startup.setStyleSheet(self._get_checkbox_stylesheet())
+        self.chk_launch_startup.setChecked(self.settings.value("launch_on_startup", False, type=bool))
+        general_layout.addWidget(self.chk_launch_startup)
+        
+        # Start in docked mode checkbox
+        self.chk_start_docked = QCheckBox("Start in docked mode")
+        self.chk_start_docked.setStyleSheet(self._get_checkbox_stylesheet())
+        self.chk_start_docked.setChecked(self.settings.value("start_docked", True, type=bool))
+        general_layout.addWidget(self.chk_start_docked)
+        
+        # Add spacing
+        general_layout.addSpacing(8)
+        
+        # Default position section
+        position_label = QLabel("Default position")
+        position_label.setStyleSheet(f"""
+            QLabel {{
+                color: {self.colors['fg']};
+                font-weight: bold;
+                font-size: 12px;
+                margin-bottom: 5px;
+            }}
+        """)
+        general_layout.addWidget(position_label)
+        
+        # Position radio buttons
+        position_widget = QWidget()
+        position_layout = QHBoxLayout(position_widget)
+        position_layout.setContentsMargins(0, 0, 0, 0)
+        position_layout.setSpacing(15)
+        
+        self.position_group = QButtonGroup()
+        self.radio_left = QRadioButton("Left")
+        self.radio_right = QRadioButton("Right")
+        
+        self.radio_left.setStyleSheet(self._get_radio_stylesheet())
+        self.radio_right.setStyleSheet(self._get_radio_stylesheet())
+        
+        self.position_group.addButton(self.radio_left, AppBarEdge.LEFT)
+        self.position_group.addButton(self.radio_right, AppBarEdge.RIGHT)
+        
+        # Set current position
+        current_edge = self.settings.value("default_edge", AppBarEdge.LEFT, type=int)
+        if current_edge == AppBarEdge.LEFT:
+            self.radio_left.setChecked(True)
+        else:
+            self.radio_right.setChecked(True)
+        
+        position_layout.addWidget(self.radio_left)
+        position_layout.addWidget(self.radio_right)
+        position_layout.addStretch()
+        
+        general_layout.addWidget(position_widget)
+        
+        # Add spacing
+        general_layout.addSpacing(8)
+        
+        # Default width section
+        width_label = QLabel("Default width")
+        width_label.setStyleSheet(f"""
+            QLabel {{
+                color: {self.colors['fg']};
+                font-weight: bold;
+                font-size: 12px;
+                margin-bottom: 5px;
+            }}
+        """)
+        general_layout.addWidget(width_label)
+        
+        # Width slider and spinbox
+        width_widget = QWidget()
+        width_layout = QHBoxLayout(width_widget)
+        width_layout.setContentsMargins(0, 0, 0, 0)
+        width_layout.setSpacing(8)
+        
+        self.width_slider = QSlider(QtCore.Qt.Horizontal)
+        self.width_slider.setMinimum(10)
+        self.width_slider.setMaximum(50)
+        self.width_slider.setValue(self.settings.value("default_width_percent", 25, type=int))
+        self.width_slider.setStyleSheet(self._get_slider_stylesheet())
+        
+        self.width_spinbox = QSpinBox()
+        self.width_spinbox.setMinimum(10)
+        self.width_spinbox.setMaximum(50)
+        self.width_spinbox.setValue(self.settings.value("default_width_percent", 25, type=int))
+        self.width_spinbox.setSuffix("%")
+        self.width_spinbox.setStyleSheet(self._get_spinbox_stylesheet())
+        self.width_spinbox.setMaximumWidth(60)  # Make spinbox smaller
+        
+        # Connect slider and spinbox
+        self.width_slider.valueChanged.connect(self.width_spinbox.setValue)
+        self.width_spinbox.valueChanged.connect(self.width_slider.setValue)
+        
+        width_layout.addWidget(self.width_slider, 1)
+        width_layout.addWidget(self.width_spinbox)
+        
+        general_layout.addWidget(width_widget)
+        
+        # Add spacing
+        general_layout.addSpacing(8)
+        
+        # Always on top section
+        always_on_top_label = QLabel("Always on top")
+        always_on_top_label.setStyleSheet(f"""
+            QLabel {{
+                color: {self.colors['fg']};
+                font-weight: bold;
+                font-size: 12px;
+                margin-bottom: 5px;
+            }}
+        """)
+        general_layout.addWidget(always_on_top_label)
+        
+        self.chk_always_on_top = QCheckBox("Keep sidebar above other windows")
+        self.chk_always_on_top.setStyleSheet(self._get_checkbox_stylesheet())
+        self.chk_always_on_top.setChecked(self.settings.value("always_on_top", True, type=bool))
+        general_layout.addWidget(self.chk_always_on_top)
+        
+        # Add spacing
+        general_layout.addSpacing(8)
+        
+        # Auto-hide section
+        autohide_label = QLabel("Auto-hide when fullscreen app detected")
+        autohide_label.setStyleSheet(f"""
+            QLabel {{
+                color: {self.colors['fg']};
+                font-weight: bold;
+                font-size: 12px;
+                margin-bottom: 5px;
+            }}
+        """)
+        general_layout.addWidget(autohide_label)
+        
+        self.chk_auto_hide = QCheckBox("Enable / disable")
+        self.chk_auto_hide.setStyleSheet(self._get_checkbox_stylesheet())
+        self.chk_auto_hide.setChecked(self.settings.value("auto_hide_fullscreen", False, type=bool))
+        general_layout.addWidget(self.chk_auto_hide)
+        
+        # Connect all settings signals AFTER all controls are created
+        self.chk_launch_startup.toggled.connect(self._on_launch_startup_changed)
+        self.chk_start_docked.toggled.connect(self._on_start_docked_changed)
+        self.position_group.buttonClicked.connect(self._on_position_changed)
+        self.width_slider.valueChanged.connect(self._on_width_changed)
+        self.chk_always_on_top.toggled.connect(self._on_always_on_top_changed)
+        self.chk_auto_hide.toggled.connect(self._on_auto_hide_changed)
+        
+        # Add stretch to push everything to top
+        general_layout.addItem(QSpacerItem(20, 40, QSizePolicy.Minimum, QSizePolicy.Expanding))
+        
+        parent_layout.addWidget(general_group)
+    
+    def _on_launch_startup_changed(self, checked):
+        """Handle launch on startup setting change."""
+        self.settings.setValue("launch_on_startup", checked)
+        logger.info(f"Launch on startup: {checked}")
+    
+    def _on_start_docked_changed(self, checked):
+        """Handle start docked setting change."""
+        self.settings.setValue("start_docked", checked)
+        logger.info(f"Start docked: {checked}")
+    
+    def _on_position_changed(self, button):
+        """Handle default position setting change."""
+        edge = self.position_group.id(button)
+        self.settings.setValue("default_edge", edge)
+        logger.info(f"Default position: {'Left' if edge == AppBarEdge.LEFT else 'Right'}")
+    
+    def _on_width_changed(self, value):
+        """Handle default width setting change."""
+        self.settings.setValue("default_width_percent", value)
+        logger.info(f"Default width: {value}%")
+    
+    def _on_always_on_top_changed(self, checked):
+        """Handle always on top setting change."""
+        self.settings.setValue("always_on_top", checked)
+        logger.info(f"Always on top: {checked}")
+    
+    def _on_auto_hide_changed(self, checked):
+        """Handle auto-hide setting change."""
+        self.settings.setValue("auto_hide_fullscreen", checked)
+        logger.info(f"Auto-hide fullscreen: {checked}")
+    
+    def _get_checkbox_stylesheet(self):
+        """Get stylesheet for checkboxes."""
+        return f"""
+            QCheckBox {{
+                color: {self.colors['fg']};
+                font-size: 11px;
+                spacing: 8px;
+            }}
+            QCheckBox::indicator {{
+                width: 16px;
+                height: 16px;
+                border: 1px solid {self.colors['border']};
+                border-radius: 3px;
+                background-color: {self.colors['panel']};
+            }}
+            QCheckBox::indicator:checked {{
+                background-color: {self.colors['accent']};
+                border: 1px solid {self.colors['accent']};
+                image: url(data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMTIiIGhlaWdodD0iMTIiIHZpZXdCb3g9IjAgMCAxMiAxMiIgZmlsbD0ibm9uZSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj4KPHBhdGggZD0iTTEwIDNMNC41IDguNUwyIDYiIHN0cm9rZT0id2hpdGUiIHN0cm9rZS13aWR0aD0iMiIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIi8+Cjwvc3ZnPgo=);
+            }}
+            QCheckBox::indicator:hover {{
+                border: 1px solid {self.colors['accent']};
+            }}
+        """
+    
+    def _get_radio_stylesheet(self):
+        """Get stylesheet for radio buttons."""
+        return f"""
+            QRadioButton {{
+                color: {self.colors['fg']};
+                font-size: 11px;
+                spacing: 8px;
+            }}
+            QRadioButton::indicator {{
+                width: 16px;
+                height: 16px;
+                border: 1px solid {self.colors['border']};
+                border-radius: 8px;
+                background-color: {self.colors['panel']};
+            }}
+            QRadioButton::indicator:checked {{
+                background-color: {self.colors['accent']};
+                border: 1px solid {self.colors['accent']};
+            }}
+            QRadioButton::indicator:hover {{
+                border: 1px solid {self.colors['accent']};
+            }}
+        """
+    
+    def _get_slider_stylesheet(self):
+        """Get stylesheet for sliders."""
+        return f"""
+            QSlider::groove:horizontal {{
+                border: 1px solid {self.colors['border']};
+                height: 6px;
+                background: {self.colors['panel']};
+                border-radius: 3px;
+            }}
+            QSlider::handle:horizontal {{
+                background: {self.colors['accent']};
+                border: 1px solid {self.colors['accent']};
+                width: 16px;
+                height: 16px;
+                border-radius: 8px;
+                margin: -6px 0;
+            }}
+            QSlider::handle:horizontal:hover {{
+                background: {self.colors['accent']};
+            }}
+        """
+    
+    def _get_spinbox_stylesheet(self):
+        """Get stylesheet for spinboxes."""
+        return f"""
+            QSpinBox {{
+                color: {self.colors['fg']};
+                background-color: {self.colors['panel']};
+                border: 1px solid {self.colors['border']};
+                border-radius: 4px;
+                padding: 4px 8px;
+                font-size: 11px;
+                min-width: 60px;
+            }}
+            QSpinBox:focus {{
+                border: 1px solid {self.colors['accent']};
+            }}
+        """
+    
     def _create_control_bar(self):
         """Create themed control bar with icons"""
         self.controls = QFrame(self)
@@ -669,6 +1131,7 @@ class AppBarWidget(QWidget):
         
         # Create icon buttons
         self.btnShot = QPushButton()
+        self.btnSettings = QPushButton()
         self.btnSide = QPushButton()
         self.btnDock = QPushButton()
         self.btnExit = QPushButton()
@@ -676,8 +1139,9 @@ class AppBarWidget(QWidget):
         # Set icons and tooltips
         self._update_button_icons_and_tooltips()
         
-        # Add buttons with proper layout: screenshot on left, others on right
+        # Add buttons with proper layout: screenshot and settings on left, others on right
         controls_layout.addWidget(self.btnShot)
+        controls_layout.addWidget(self.btnSettings)
         controls_layout.addStretch()
         controls_layout.addWidget(self.btnSide)
         controls_layout.addWidget(self.btnDock)
@@ -692,6 +1156,16 @@ class AppBarWidget(QWidget):
         self.btnShot.setIcon(self.icons['camera'])
         self.btnShot.setToolTip("Attach a screenshot to the current chat")
         self.btnShot.setAccessibleName("Screenshot")
+        
+        # Settings button
+        # Create a simple icon directly for settings
+        settings_icon = self._create_simple_settings_icon()
+        self.btnSettings.setIcon(settings_icon)
+        self.btnSettings.setToolTip("Settings")
+        self.btnSettings.setAccessibleName("Settings")
+        # Ensure button is visible
+        self.btnSettings.setVisible(True)
+        self.btnSettings.show()
         
         # Side toggle button
         if self.edge == AppBarEdge.LEFT:
@@ -712,6 +1186,27 @@ class AppBarWidget(QWidget):
         # Exit button
         self.btnExit.setIcon(self.icons['exit'])
         self.btnExit.setToolTip("Exit")
+    
+    def _create_simple_settings_icon(self) -> QIcon:
+        """Create a very simple settings icon that should always work."""
+        # Just use the gear emoji directly - it's the best option for settings
+        pixmap = QtGui.QPixmap(20, 20)
+        pixmap.fill(QtCore.Qt.transparent)
+        
+        painter = QtGui.QPainter(pixmap)
+        painter.setRenderHint(QtGui.QPainter.Antialiasing)
+        
+        # Set font and color
+        font = QtGui.QFont()
+        font.setPointSize(14)
+        painter.setFont(font)
+        painter.setPen(QtGui.QColor(self.colors['fg']))
+        
+        # Draw gear emoji
+        painter.drawText(pixmap.rect(), QtCore.Qt.AlignCenter, "⚙︎")
+        
+        painter.end()
+        return QIcon(pixmap)
     
     def _start_undocked(self) -> None:
         """Start in undocked mode with restored geometry."""
@@ -939,6 +1434,18 @@ class AppBarWidget(QWidget):
         user32.MoveWindow(hwnd, x, y, w, h, True)
 
     # ----- Button slot methods -----
+    def on_show_settings(self) -> None:
+        """Show the settings view."""
+        if self.settings_view is None:
+            # Create settings view on first access
+            self._create_settings_view()
+            self.stacked_widget.addWidget(self.settings_view)  # index 1: settings
+        self.stacked_widget.setCurrentIndex(1)
+    
+    def on_back_to_chat(self) -> None:
+        """Return to the chat view."""
+        self.stacked_widget.setCurrentIndex(0)
+    
     def on_toggle_side(self) -> None:
         """Toggle between left and right docking."""
         if self.edge == AppBarEdge.LEFT:
