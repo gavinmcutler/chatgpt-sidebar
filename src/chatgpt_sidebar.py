@@ -12,7 +12,6 @@ import argparse
 import base64
 import json
 import logging
-import math
 import os
 import pathlib
 import signal
@@ -25,12 +24,12 @@ from ctypes import wintypes
 
 from PySide6 import QtCore, QtGui, QtWidgets
 from PySide6.QtCore import QBuffer
-from PySide6.QtGui import QGuiApplication, QIcon, QPalette
+from PySide6.QtGui import QGuiApplication, QIcon, QPalette, QImage
 from PySide6.QtWebEngineCore import QWebEnginePage, QWebEngineProfile
 from PySide6.QtWebEngineWidgets import QWebEngineView
 from PySide6.QtWidgets import (
     QApplication, QFrame, QHBoxLayout, QLabel, QPushButton, QVBoxLayout, QWidget, QStackedWidget, QStyle,
-    QCheckBox, QSlider, QSpinBox, QRadioButton, QButtonGroup, QGroupBox, QFormLayout, QSpacerItem, QSizePolicy,
+    QCheckBox, QSlider, QSpinBox, QRadioButton, QButtonGroup, QGroupBox, QSpacerItem, QSizePolicy,
     QScrollArea
 )
 
@@ -76,18 +75,7 @@ class AppBarNotification:
 # AppBar edge constants
 class AppBarEdge:
     LEFT = 0
-    TOP = 1
     RIGHT = 2
-    BOTTOM = 3
-
-# Window positioning constants
-class WindowPos:
-    NOZORDER = 0x0004
-    NOACTIVATE = 0x0010
-    SHOWWINDOW = 0x0040
-
-# Window handle constants
-HWND_TOP = 0
 
 # Window show constants
 class SW:
@@ -104,12 +92,10 @@ GA_ROOT = 2
 class BitmapInfo:
     RGB = 0  # BI_RGB
     BIT_COUNT_32 = 32
-    PLANES = 1
 
 # Application constants
 class AppConstants:
     DEFAULT_WIDTH = 420
-    DEFAULT_HEIGHT = 1000
     DEFAULT_URL = "https://chat.openai.com/"
     DEFAULT_TITLE = "ChatGPT Sidebar"
     TOAST_DURATION = 3000
@@ -136,27 +122,23 @@ class AppConstants:
         'accent': '#0078d4'
     }
 
-user32   = ctypes.windll.user32
-shell32  = ctypes.windll.shell32
-gdi32    = ctypes.windll.gdi32
-
-RegisterWindowMessageW = user32.RegisterWindowMessageW
-FindWindowW            = user32.FindWindowW
-SetWindowPos           = user32.SetWindowPos
+# Win32 API DLL bindings
+user32 = ctypes.windll.user32
+shell32 = ctypes.windll.shell32
+gdi32 = ctypes.windll.gdi32
 
 # Win32 API function bindings
+RegisterWindowMessageW = user32.RegisterWindowMessageW
 GetForegroundWindow = user32.GetForegroundWindow
 WindowFromPoint = user32.WindowFromPoint
 GetAncestor = user32.GetAncestor
 IsWindowVisible = user32.IsWindowVisible
 GetWindowRect = user32.GetWindowRect
 EnumWindows = user32.EnumWindows
-GetDesktopWindow = user32.GetDesktopWindow
 ShowWindow = user32.ShowWindow
 PrintWindow = user32.PrintWindow
 MonitorFromWindow = user32.MonitorFromWindow
 GetMonitorInfoW = user32.GetMonitorInfoW
-GetSystemMetrics = user32.GetSystemMetrics
 
 class RECT(ctypes.Structure):
     _fields_ = [("left",  ctypes.c_long),
@@ -182,13 +164,8 @@ class MONITORINFO(ctypes.Structure):
                 ("dwFlags", ctypes.c_uint32)]
 
 def SHAppBarMessage(msg, data):
+    """Send AppBar message to Windows shell."""
     return shell32.SHAppBarMessage(ctypes.c_uint(msg), ctypes.byref(data))
-
-# Helper functions for window capture
-def _rect_to_tuple(rect):
-    r = RECT()
-    GetWindowRect(rect, ctypes.byref(r))
-    return (r.left, r.top, r.right, r.bottom)
 
 def _get_top_level_at_point(x: int, y: int) -> int:
     """Get the top-level window at the specified point."""
@@ -255,6 +232,7 @@ class ThemeManager:
                 min-height: 22px;
                 max-width: 26px;
                 max-height: 26px;
+                outline: none;
             }}
             QPushButton:hover {{
                 background-color: {colors['hover']};
@@ -263,13 +241,13 @@ class ThemeManager:
                 background-color: {colors['pressed']};
             }}
             QPushButton:focus {{
-                outline: 2px solid {colors['accent']};
-                outline-offset: 2px;
+                outline: none;
+                border: none;
             }}
         """
 
     @staticmethod
-    def create_icon(theme_name: str, fallback_text: str, colors: Dict[str, str]) -> QIcon:
+    def create_icon(theme_name: str, colors: Dict[str, str]) -> QIcon:
         """Create icon with proper fallback."""
         # Try system theme first
         icon = QIcon.fromTheme(theme_name)
@@ -416,13 +394,13 @@ class ThemeManager:
     def get_control_icons(colors: Dict[str, str]) -> Dict[str, QIcon]:
         """Get all control icons with theme adaptation."""
         return {
-            'left': ThemeManager.create_icon('go-previous', 'left', colors),
-            'right': ThemeManager.create_icon('go-next', 'right', colors),
-            'dock': ThemeManager.create_icon('view-fullscreen', 'dock', colors),
-            'undock': ThemeManager.create_icon('view-restore', 'undock', colors),
-            'exit': ThemeManager.create_icon('window-close', 'exit', colors),
-            'camera': ThemeManager.create_icon('camera-photo', 'camera', colors),
-            'settings': ThemeManager.create_icon('settings', 'settings', colors)
+            'left': ThemeManager.create_icon('go-previous', colors),
+            'right': ThemeManager.create_icon('go-next', colors),
+            'dock': ThemeManager.create_icon('view-fullscreen', colors),
+            'undock': ThemeManager.create_icon('view-restore', colors),
+            'exit': ThemeManager.create_icon('window-close', colors),
+            'camera': ThemeManager.create_icon('camera-photo', colors),
+            'settings': ThemeManager.create_icon('settings', colors)
         }
 
 # ---------------- JavaScript helpers for screenshot functionality ----------------
@@ -473,10 +451,6 @@ def _build_paste_js(b64: str) -> str:
 
 class WindowCapture:
     """Helper class for capturing window screenshots."""
-    
-    def __init__(self) -> None:
-        """Initialize the window capture helper."""
-        pass
     
     @staticmethod
     def get_window_rect(hwnd: int) -> Tuple[int, int, int, int]:
@@ -587,7 +561,6 @@ class WindowCapture:
             user32.ReleaseDC(hwnd, hdcWindow)
 
             # Convert to QImage (Format_ARGB32)
-            from PySide6.QtGui import QImage
             img = QImage(bytes(pixel_data), w, h, QImage.Format.Format_ARGB32)
             return img.copy()  # detach from buffer
         
@@ -923,22 +896,24 @@ class AppBarWidget(QWidget):
         width_layout.setSpacing(8)
         
         self.width_slider = QSlider(QtCore.Qt.Horizontal)
-        self.width_slider.setMinimum(10)
-        self.width_slider.setMaximum(50)
-        self.width_slider.setValue(self.settings.value("default_width_percent", 25, type=int))
+        self.width_slider.setMinimum(2)  # 10% / 5 = 2
+        self.width_slider.setMaximum(10)  # 50% / 5 = 10
+        self.width_slider.setValue(self.settings.value("default_width_percent", 25, type=int) // 5)  # Convert to 5% intervals
         self.width_slider.setStyleSheet(self._get_slider_stylesheet())
+        self.width_slider.setMaximumWidth(120)  # Make slider narrower
         
         self.width_spinbox = QSpinBox()
         self.width_spinbox.setMinimum(10)
         self.width_spinbox.setMaximum(50)
+        self.width_spinbox.setSingleStep(5)  # Increment by 5%
         self.width_spinbox.setValue(self.settings.value("default_width_percent", 25, type=int))
         self.width_spinbox.setSuffix("%")
         self.width_spinbox.setStyleSheet(self._get_spinbox_stylesheet())
         self.width_spinbox.setMaximumWidth(60)  # Make spinbox smaller
         
-        # Connect slider and spinbox
-        self.width_slider.valueChanged.connect(self.width_spinbox.setValue)
-        self.width_spinbox.valueChanged.connect(self.width_slider.setValue)
+        # Connect slider and spinbox with 5% interval conversion
+        self.width_slider.valueChanged.connect(self._on_width_slider_changed)
+        self.width_spinbox.valueChanged.connect(self._on_width_spinbox_changed)
         
         width_layout.addWidget(self.width_slider, 1)
         width_layout.addWidget(self.width_spinbox)
@@ -985,49 +960,299 @@ class AppBarWidget(QWidget):
         self.chk_auto_hide.setChecked(self.settings.value("auto_hide_fullscreen", False, type=bool))
         general_layout.addWidget(self.chk_auto_hide)
         
+        # Store original values to detect changes
+        self._original_values = {
+            'launch_on_startup': self.chk_launch_startup.isChecked(),
+            'start_docked': self.chk_start_docked.isChecked(),
+            'default_edge': self.position_group.checkedId(),
+            'default_width_percent': self.width_spinbox.value(),
+            'always_on_top': self.chk_always_on_top.isChecked(),
+            'auto_hide_fullscreen': self.chk_auto_hide.isChecked()
+        }
+        
         # Connect all settings signals AFTER all controls are created
-        self.chk_launch_startup.toggled.connect(self._on_launch_startup_changed)
-        self.chk_start_docked.toggled.connect(self._on_start_docked_changed)
-        self.position_group.buttonClicked.connect(self._on_position_changed)
-        self.width_slider.valueChanged.connect(self._on_width_changed)
-        self.chk_always_on_top.toggled.connect(self._on_always_on_top_changed)
-        self.chk_auto_hide.toggled.connect(self._on_auto_hide_changed)
+        self.chk_launch_startup.toggled.connect(self._on_setting_changed)
+        self.chk_start_docked.toggled.connect(self._on_setting_changed)
+        self.position_group.buttonClicked.connect(self._on_setting_changed)
+        self.width_spinbox.valueChanged.connect(self._on_setting_changed)
+        self.chk_always_on_top.toggled.connect(self._on_setting_changed)
+        self.chk_auto_hide.toggled.connect(self._on_setting_changed)
         
         # Add stretch to push everything to top
         general_layout.addItem(QSpacerItem(20, 40, QSizePolicy.Minimum, QSizePolicy.Expanding))
         
         parent_layout.addWidget(general_group)
+        
+        # Add buttons at the bottom
+        self._create_settings_buttons(parent_layout)
     
-    def _on_launch_startup_changed(self, checked):
-        """Handle launch on startup setting change."""
-        self.settings.setValue("launch_on_startup", checked)
-        logger.info(f"Launch on startup: {checked}")
+    def _create_settings_buttons(self, parent_layout):
+        """Create Apply and Restore buttons at the bottom of settings."""
+        # Button container
+        button_widget = QWidget()
+        button_layout = QHBoxLayout(button_widget)
+        button_layout.setContentsMargins(10, 15, 10, 10)
+        button_layout.setSpacing(10)
+        
+        # Restore to Default button
+        self.btn_restore_default = QPushButton("Restore to Default")
+        self.btn_restore_default.setStyleSheet(self._get_button_stylesheet())
+        self.btn_restore_default.clicked.connect(self._on_restore_default)
+        
+        # Apply button (initially disabled)
+        self.btn_apply = QPushButton("Apply")
+        self.btn_apply.setEnabled(False)
+        self.btn_apply.setStyleSheet(self._get_button_stylesheet())
+        self.btn_apply.clicked.connect(self._on_apply_settings)
+        
+        # Add buttons to layout
+        button_layout.addWidget(self.btn_restore_default)
+        button_layout.addStretch()
+        button_layout.addWidget(self.btn_apply)
+        
+        parent_layout.addWidget(button_widget)
     
-    def _on_start_docked_changed(self, checked):
-        """Handle start docked setting change."""
-        self.settings.setValue("start_docked", checked)
-        logger.info(f"Start docked: {checked}")
+    def _get_button_stylesheet(self):
+        """Get stylesheet for buttons."""
+        return f"""
+            QPushButton {{
+                color: {self.colors['fg']};
+                background-color: {self.colors['panel']};
+                border: 1px solid {self.colors['border']};
+                border-radius: 6px;
+                padding: 8px 16px;
+                font-size: 11px;
+                font-weight: bold;
+                min-width: 80px;
+            }}
+            QPushButton:hover {{
+                background-color: {self.colors['hover']};
+            }}
+            QPushButton:pressed {{
+                background-color: {self.colors['pressed']};
+            }}
+            QPushButton:disabled {{
+                color: {self.colors['border']};
+                background-color: {self.colors['bg']};
+                border: 1px solid {self.colors['border']};
+            }}
+            QPushButton:enabled {{
+                border: 1px solid {self.colors['accent']};
+            }}
+        """
     
-    def _on_position_changed(self, button):
-        """Handle default position setting change."""
-        edge = self.position_group.id(button)
-        self.settings.setValue("default_edge", edge)
-        logger.info(f"Default position: {'Left' if edge == AppBarEdge.LEFT else 'Right'}")
+    def _on_setting_changed(self):
+        """Handle any setting change to enable Apply button."""
+        has_changes = (
+            self.chk_launch_startup.isChecked() != self._original_values['launch_on_startup'] or
+            self.chk_start_docked.isChecked() != self._original_values['start_docked'] or
+            self.position_group.checkedId() != self._original_values['default_edge'] or
+            self.width_spinbox.value() != self._original_values['default_width_percent'] or
+            self.chk_always_on_top.isChecked() != self._original_values['always_on_top'] or
+            self.chk_auto_hide.isChecked() != self._original_values['auto_hide_fullscreen']
+        )
+        self.btn_apply.setEnabled(has_changes)
     
-    def _on_width_changed(self, value):
-        """Handle default width setting change."""
-        self.settings.setValue("default_width_percent", value)
-        logger.info(f"Default width: {value}%")
+    def _on_restore_default(self):
+        """Restore all settings to default values and apply them."""
+        # Set default values in UI
+        self.chk_launch_startup.setChecked(False)
+        self.chk_start_docked.setChecked(True)
+        self.radio_left.setChecked(True)
+        self.width_spinbox.setValue(25)
+        self.chk_always_on_top.setChecked(True)
+        self.chk_auto_hide.setChecked(False)
+        
+        # Save default settings
+        self.settings.setValue("launch_on_startup", False)
+        self.settings.setValue("start_docked", True)
+        self.settings.setValue("default_edge", AppBarEdge.LEFT)
+        self.settings.setValue("default_width_percent", 25)
+        self.settings.setValue("always_on_top", True)
+        self.settings.setValue("auto_hide_fullscreen", False)
+        
+        # Apply the default settings immediately
+        # Check if launch on startup needs to be changed
+        if self._original_values['launch_on_startup']:
+            self._apply_launch_on_startup(False)
+        
+        # Check if always on top needs to be changed
+        if not self._original_values['always_on_top']:
+            self._apply_always_on_top(True)
+        
+        # Apply edge change if different and docked
+        if self._original_values['default_edge'] != AppBarEdge.LEFT and self.is_docked:
+            self.edge = AppBarEdge.LEFT
+            self._dock()
+            self._update_button_icons_and_tooltips()
+        elif self._original_values['default_edge'] != AppBarEdge.LEFT:
+            self.edge = AppBarEdge.LEFT
+        
+        # Apply width change (25%)
+        if self._original_values['default_width_percent'] != 25:
+            screen = QGuiApplication.primaryScreen().availableGeometry()
+            new_width = int(screen.width() * 0.25)  # 25%
+            self.desired_width = new_width
+            self.settings.setValue("width", new_width)
+            
+            if self.is_docked:
+                self._dock()
+        
+        # Update original values to defaults
+        self._original_values = {
+            'launch_on_startup': False,
+            'start_docked': True,
+            'default_edge': AppBarEdge.LEFT,
+            'default_width_percent': 25,
+            'always_on_top': True,
+            'auto_hide_fullscreen': False
+        }
+        
+        # Disable Apply button since we just applied
+        self.btn_apply.setEnabled(False)
+        
+        # Show confirmation toast
+        self._show_toast("Settings restored to defaults", duration_ms=2000)
+        
+        logger.info("Settings restored to defaults and applied")
     
-    def _on_always_on_top_changed(self, checked):
-        """Handle always on top setting change."""
-        self.settings.setValue("always_on_top", checked)
-        logger.info(f"Always on top: {checked}")
+    def _on_apply_settings(self):
+        """Apply current settings and save them."""
+        # Check which settings changed
+        launch_startup_changed = self.chk_launch_startup.isChecked() != self._original_values['launch_on_startup']
+        edge_changed = self.position_group.checkedId() != self._original_values['default_edge']
+        width_changed = self.width_spinbox.value() != self._original_values['default_width_percent']
+        always_on_top_changed = self.chk_always_on_top.isChecked() != self._original_values['always_on_top']
+        
+        # Save all settings
+        self.settings.setValue("launch_on_startup", self.chk_launch_startup.isChecked())
+        self.settings.setValue("start_docked", self.chk_start_docked.isChecked())
+        self.settings.setValue("default_edge", self.position_group.checkedId())
+        self.settings.setValue("default_width_percent", self.width_spinbox.value())
+        self.settings.setValue("always_on_top", self.chk_always_on_top.isChecked())
+        self.settings.setValue("auto_hide_fullscreen", self.chk_auto_hide.isChecked())
+        
+        # Apply launch on startup setting
+        if launch_startup_changed:
+            self._apply_launch_on_startup(self.chk_launch_startup.isChecked())
+        
+        # Apply always on top setting
+        if always_on_top_changed:
+            self._apply_always_on_top(self.chk_always_on_top.isChecked())
+        
+        # Apply edge change if docked
+        if edge_changed and self.is_docked:
+            self.edge = self.position_group.checkedId()
+            self._dock()
+            self._update_button_icons_and_tooltips()
+        elif edge_changed:
+            # Just update edge for next time we dock
+            self.edge = self.position_group.checkedId()
+        
+        # Apply width change
+        if width_changed:
+            # Calculate actual width from percentage
+            screen = QGuiApplication.primaryScreen().availableGeometry()
+            new_width = int(screen.width() * (self.width_spinbox.value() / 100))
+            self.desired_width = new_width
+            self.settings.setValue("width", new_width)
+            
+            # Apply width if currently docked
+            if self.is_docked:
+                self._dock()
+        
+        # Update original values to current values
+        self._original_values = {
+            'launch_on_startup': self.chk_launch_startup.isChecked(),
+            'start_docked': self.chk_start_docked.isChecked(),
+            'default_edge': self.position_group.checkedId(),
+            'default_width_percent': self.width_spinbox.value(),
+            'always_on_top': self.chk_always_on_top.isChecked(),
+            'auto_hide_fullscreen': self.chk_auto_hide.isChecked()
+        }
+        
+        # Disable Apply button
+        self.btn_apply.setEnabled(False)
+        
+        # Show confirmation toast
+        self._show_toast("Settings applied successfully", duration_ms=2000)
+        
+        logger.info("Settings applied and saved")
     
-    def _on_auto_hide_changed(self, checked):
-        """Handle auto-hide setting change."""
-        self.settings.setValue("auto_hide_fullscreen", checked)
-        logger.info(f"Auto-hide fullscreen: {checked}")
+    def _apply_launch_on_startup(self, enable: bool) -> None:
+        """Apply launch on startup setting by modifying Windows registry."""
+        try:
+            import winreg
+            key_path = r"Software\Microsoft\Windows\CurrentVersion\Run"
+            app_name = "ChatGPT Sidebar"
+            
+            # Get the executable path
+            if getattr(sys, 'frozen', False):
+                # Running as compiled executable
+                exe_path = sys.executable
+            else:
+                # Running as script - use pythonw to avoid console window
+                exe_path = f'pythonw "{os.path.abspath(__file__)}"'
+            
+            key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, key_path, 0, winreg.KEY_SET_VALUE)
+            
+            if enable:
+                # Add to startup
+                winreg.SetValueEx(key, app_name, 0, winreg.REG_SZ, exe_path)
+                logger.info(f"Added to startup: {exe_path}")
+            else:
+                # Remove from startup
+                try:
+                    winreg.DeleteValue(key, app_name)
+                    logger.info("Removed from startup")
+                except FileNotFoundError:
+                    # Already not in startup, that's fine
+                    pass
+            
+            winreg.CloseKey(key)
+        except Exception as e:
+            logger.error(f"Failed to modify startup setting: {e}")
+            self._show_toast(f"Could not modify startup setting: {e}", duration_ms=3000)
+    
+    def _apply_always_on_top(self, enable: bool) -> None:
+        """Apply always on top setting to the window."""
+        try:
+            current_flags = self.windowFlags()
+            
+            if enable:
+                # Add WindowStaysOnTopHint flag
+                new_flags = current_flags | QtCore.Qt.WindowStaysOnTopHint
+            else:
+                # Remove WindowStaysOnTopHint flag
+                new_flags = current_flags & ~QtCore.Qt.WindowStaysOnTopHint
+            
+            # Only update if flags actually changed
+            if new_flags != current_flags:
+                # Need to hide, change flags, and show again
+                was_visible = self.isVisible()
+                self.setWindowFlags(new_flags)
+                if was_visible:
+                    self.show()
+                    # Re-dock if needed
+                    if self.is_docked:
+                        self._dock()
+                
+                logger.info(f"Always on top: {enable}")
+        except Exception as e:
+            logger.error(f"Failed to apply always on top setting: {e}")
+            self._show_toast(f"Could not apply always on top: {e}", duration_ms=3000)
+    
+    def _on_width_slider_changed(self, value):
+        """Handle width slider change (converts from 5% intervals to actual percentage)."""
+        actual_value = value * 5  # Convert slider value (2-10) to percentage (10-50)
+        self.width_spinbox.setValue(actual_value)
+        # Don't save here - wait for Apply button
+    
+    def _on_width_spinbox_changed(self, value):
+        """Handle width spinbox change (converts to 5% intervals for slider)."""
+        slider_value = value // 5  # Convert percentage to slider value (10-50 to 2-10)
+        self.width_slider.setValue(slider_value)
+        # Don't save here - wait for Apply button
     
     def _get_checkbox_stylesheet(self):
         """Get stylesheet for checkboxes."""
