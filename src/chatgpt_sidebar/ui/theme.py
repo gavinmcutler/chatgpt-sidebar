@@ -36,12 +36,24 @@ class ThemeManager:
     """Manages theme detection and styling for the application."""
     
     @staticmethod
-    def detect_theme_colors() -> Dict[str, str]:
-        """Detect system theme and return color palette.
+    def detect_theme_colors(theme_preference: str = "system") -> Dict[str, str]:
+        """Detect or select theme and return color palette.
+        
+        Args:
+            theme_preference: User's theme preference ("system", "light", or "dark")
         
         Returns:
-            Dict[str, str]: Color palette for the detected theme
+            Dict[str, str]: Color palette for the selected/detected theme
         """
+        # If user has chosen a specific theme, use it
+        if theme_preference == "light":
+            logger.info("Using light theme (user preference)")
+            return LIGHT_THEME
+        elif theme_preference == "dark":
+            logger.info("Using dark theme (user preference)")
+            return DARK_THEME
+        
+        # Otherwise, detect system theme
         app = QApplication.instance()
         if app is None:
             logger.warning("No QApplication instance found for theme detection")
@@ -62,7 +74,7 @@ class ThemeManager:
             is_dark = False
         
         theme = DARK_THEME if is_dark else LIGHT_THEME
-        logger.info(f"Detected {'dark' if is_dark else 'light'} theme")
+        logger.info(f"Detected {'dark' if is_dark else 'light'} theme (system)")
         return theme
     
     @staticmethod

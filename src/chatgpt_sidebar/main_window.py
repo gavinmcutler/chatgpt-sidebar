@@ -59,20 +59,25 @@ class MainWindow(QWidget):
         
         # Initialize configuration
         self.config = Config()
-        self.desired_width = self.config.get_width(desired_width)
+        
+        # Calculate width from percentage
+        screen = QGuiApplication.primaryScreen().availableGeometry()
+        width_percent = self.config.get_width_percent()
+        self.desired_width = int(screen.width() * width_percent / 100)
+        
         self.edge_str = "left" if self.config.get_edge() == AppBarEdge.LEFT else "right"
         self.is_docked = self.config.is_docked()
         
         # Theme and colors
-        self.colors = ThemeManager.detect_theme_colors()
+        theme_preference = self.config.get_theme()
+        self.colors = ThemeManager.detect_theme_colors(theme_preference)
         self.icons = ThemeManager.get_control_icons(self.colors)
         
         # Set up window flags for docked mode
-        self.setWindowFlags(
-            self.windowFlags()
-            | QtCore.Qt.FramelessWindowHint
-            | QtCore.Qt.WindowStaysOnTopHint
-        )
+        flags = self.windowFlags() | QtCore.Qt.FramelessWindowHint
+        if self.config.get_always_on_top():
+            flags |= QtCore.Qt.WindowStaysOnTopHint
+        self.setWindowFlags(flags)
         self.setAttribute(QtCore.Qt.WA_TranslucentBackground, False)
         
         # Initialize AppBar (will be set up after show())
@@ -104,8 +109,14 @@ class MainWindow(QWidget):
         self.topbar.toggle_dock_clicked.connect(self.on_toggle_dock)
         self.topbar.exit_clicked.connect(self.on_exit)
         
+        # Connect sidebar signals
+        self.sidebar.settings_changed.connect(self.on_settings_changed)
+        
         # Update topbar button states
         self._update_topbar_buttons()
+        
+        # Apply saved appearance settings
+        self._apply_initial_settings()
         
         # Initialize toast system
         self._toast_label: Optional[QLabel] = None
@@ -122,6 +133,23 @@ class MainWindow(QWidget):
             QTimer.singleShot(0, self._register_appbar)
         else:
             QTimer.singleShot(0, self._start_undocked)
+    
+    def _apply_initial_settings(self) -> None:
+        """Apply saved appearance settings on startup.
+        
+        Applies settings that can be changed without restart:
+        - Window opacity
+        - Web content zoom (font size)
+        """
+        # Apply opacity
+        opacity = self.config.get_opacity()
+        self.setWindowOpacity(opacity)
+        
+        # Apply zoom (from saved zoom or font size)
+        zoom = self.config.get_zoom()
+        self.engine.set_zoom(zoom)
+        
+        logger.info(f"Applied initial settings: opacity={opacity}, zoom={zoom}")
     
     def _register_appbar(self) -> None:
         """Register the window as an AppBar."""
@@ -211,6 +239,115 @@ class MainWindow(QWidget):
     def on_show_settings(self) -> None:
         """Show settings view."""
         self.sidebar.show_settings()
+    
+    def on_settings_changed(self, settings: dict) -> None:
+        """Handle settings changes.
+        
+        Args:
+            settings: Dictionary of changed settings
+        """
+        logger.info(f"Settings changed: {settings}")
+        
+        # Apply opacity changes
+        if 'opacity' in settings:
+            opacity = settings['opacity']
+            self.setWindowOpacity(opacity)
+            logger.info(f"Applied opacity: {opacity}")
+        
+        # Apply font size changes (via zoom)
+        if 'font_size' in settings:
+            font_size = settings['font_size']
+            zoom_map = {
+                'small': 0.85,
+                'medium': 1.0,
+                'large': 1.15
+            }
+            zoom = zoom_map.get(font_size, 1.0)
+            self.config.set_zoom(zoom)
+            self.engine.set_zoom(zoom)
+            logger.info(f"Applied font size: {font_size} (zoom: {zoom})")
+        
+        # Apply always on top changes
+        if 'always_on_top' in settings:
+            always_on_top = settings['always_on_top']
+            
+            # Only apply immediately in undocked mode
+            # In docked mode, it requires restart to avoid AppBar issues
+            if not self.is_docked:
+                if always_on_top:
+                    self.setWindowFlags(self.windowFlags() | QtCore.Qt.WindowStaysOnTopHint)
+                else:
+                    self.setWindowFlags(self.windowFlags() & ~QtCore.Qt.WindowStaysOnTopHint)
+                self.show()
+                logger.info(f"Applied always on top: {always_on_top}")
+            else:
+                logger.info(f"Always on top setting saved: {always_on_top} (will apply on restart)")
+        
+        # Handle autostart (Windows registry)
+        if 'autostart' in settings:
+            autostart = settings['autostart']
+            self._set_autostart(autostart)
+            logger.info(f"Applied autostart: {autostart}")
+        
+        # Note: Theme, corner radius, edge, width, docked state, and always on top (when docked)
+        # typically require an app restart to fully apply
+        requires_restart = []
+        if 'theme' in settings:
+            requires_restart.append('theme')
+        if 'corner_radius' in settings:
+            requires_restart.append('corner radius')
+        if 'edge' in settings:
+            # Check if edge changed from current window state
+            current_edge = AppBarEdge.LEFT if self.edge_str == "left" else AppBarEdge.RIGHT
+            if settings['edge'] != current_edge:
+                requires_restart.append('position')
+        if 'docked' in settings and settings['docked'] != self.is_docked:
+            requires_restart.append('dock mode')
+        if 'width_percent' in settings:
+            requires_restart.append('width')
+        if 'always_on_top' in settings and self.is_docked:
+            requires_restart.append('always on top')
+        
+        if requires_restart:
+            restart_msg = f"Some settings ({', '.join(requires_restart)}) will take effect after restarting the app"
+            self._show_toast(restart_msg, duration=5000)
+            logger.info(restart_msg)
+        else:
+            self._show_toast("Settings applied successfully")
+    
+    def _set_autostart(self, enable: bool) -> None:
+        """Enable or disable autostart via Windows registry.
+        
+        Args:
+            enable: Whether to enable autostart
+        """
+        try:
+            key_path = r"Software\Microsoft\Windows\CurrentVersion\Run"
+            key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, key_path, 0, winreg.KEY_SET_VALUE)
+            
+            if enable:
+                exe_path = sys.executable
+                # If running from Python, use the script path
+                if exe_path.endswith("python.exe") or exe_path.endswith("pythonw.exe"):
+                    import __main__
+                    if hasattr(__main__, '__file__'):
+                        exe_path = f'"{sys.executable}" "{__main__.__file__}"'
+                else:
+                    exe_path = f'"{exe_path}"'
+                
+                winreg.SetValueEx(key, "ChatGPTSidebar", 0, winreg.REG_SZ, exe_path)
+                logger.info(f"Autostart enabled: {exe_path}")
+            else:
+                try:
+                    winreg.DeleteValue(key, "ChatGPTSidebar")
+                    logger.info("Autostart disabled")
+                except FileNotFoundError:
+                    pass  # Value doesn't exist, already disabled
+            
+            winreg.CloseKey(key)
+        except Exception as e:
+            logger.error(f"Failed to set autostart: {e}")
+            self._show_toast(f"Failed to set autostart: {e}", duration=4000)
     
     def on_toggle_side(self) -> None:
         """Toggle between left and right edge."""
@@ -305,11 +442,13 @@ class MainWindow(QWidget):
         self.config.set_docked(True)
     
     def _save_preferences(self) -> None:
-        """Save preferences to config."""
-        edge_int = AppBarEdge.LEFT if self.edge_str == "left" else AppBarEdge.RIGHT
-        self.config.set_edge(edge_int)
-        self.config.set_width(self.desired_width)
-        self.config.set_docked(self.is_docked)
+        """Save preferences to config.
+        
+        Note: All settings are saved immediately when changed via the settings UI.
+        This method is kept for backwards compatibility but does nothing to avoid
+        overwriting user preferences with the current window state on exit.
+        """
+        pass
     
     # Toast notifications
     def _show_toast(self, message: str, duration_ms: int = TOAST_DURATION) -> None:

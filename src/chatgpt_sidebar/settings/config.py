@@ -37,6 +37,7 @@ class Config:
             value: Value to set
         """
         self._settings.setValue(key, value)
+        self._settings.sync()  # Force immediate write to disk
     
     def get_edge(self) -> int:
         """Get the edge setting (left=0, right=2).
@@ -73,7 +74,7 @@ class Config:
         """
         self.set("width", width)
     
-    def get_width_percent(self, default: int = 25) -> int:
+    def get_width_percent(self, default: int = 20) -> int:
         """Get the width percentage setting.
         
         Args:
@@ -183,4 +184,84 @@ class Config:
             geometry: Window geometry to save
         """
         self.set("undocked_geometry", geometry)
+    
+    # -------------------------------------------------------------------------
+    # Appearance settings
+    # -------------------------------------------------------------------------
+    
+    def get_theme(self, default: str = "system") -> str:
+        """Get the theme setting.
+        
+        Args:
+            default: Default theme ("system", "light", or "dark")
+            
+        Returns:
+            str: Theme setting
+        """
+        return self.get("theme", default, str)
+    
+    def set_theme(self, theme: str) -> None:
+        """Set the theme setting.
+        
+        Args:
+            theme: Theme to use ("system", "light", or "dark")
+        """
+        self.set("theme", theme)
+    
+    def get_opacity(self, default: float = 1.0) -> float:
+        """Get the window opacity setting.
+        
+        Args:
+            default: Default opacity (0.0 to 1.0)
+            
+        Returns:
+            float: Opacity value
+        """
+        return self.get("opacity", default, float)
+    
+    def set_opacity(self, opacity: float) -> None:
+        """Set the window opacity setting.
+        
+        Args:
+            opacity: Opacity value (0.0 to 1.0)
+        """
+        self.set("opacity", opacity)
+    
+    def get_corner_radius(self, default: int = 0) -> int:
+        """Get the corner radius setting.
+        
+        Args:
+            default: Default corner radius in pixels
+            
+        Returns:
+            int: Corner radius value
+        """
+        return self.get("corner_radius", default, int)
+    
+    def set_corner_radius(self, radius: int) -> None:
+        """Set the corner radius setting.
+        
+        Args:
+            radius: Corner radius in pixels
+        """
+        self.set("corner_radius", radius)
+    
+    def get_font_size(self, default: str = "medium") -> str:
+        """Get the font size setting.
+        
+        Args:
+            default: Default font size ("small", "medium", or "large")
+            
+        Returns:
+            str: Font size setting
+        """
+        return self.get("font_size", default, str)
+    
+    def set_font_size(self, font_size: str) -> None:
+        """Set the font size setting.
+        
+        Args:
+            font_size: Font size ("small", "medium", or "large")
+        """
+        self.set("font_size", font_size)
 
