@@ -76,6 +76,9 @@ class Sidebar(QStackedWidget):
         self.width_spinbox.setValue(width_percent)
         self.width_slider.setValue(width_percent // 5)
         
+        # Storage settings
+        self.chk_stay_signed_in.setChecked(self.config.get_stay_signed_in())
+        
         # Appearance settings
         current_theme = self.config.get_theme()
         if current_theme == "system":
@@ -86,7 +89,6 @@ class Sidebar(QStackedWidget):
             self.radio_dark.setChecked(True)
         
         self.opacity_slider.setValue(int(self.config.get_opacity() * 100))
-        self.radius_slider.setValue(self.config.get_corner_radius())
         
         current_fontsize = self.config.get_font_size()
         if current_fontsize == "small":
@@ -221,6 +223,7 @@ class Sidebar(QStackedWidget):
         # Create settings sections
         self._create_general_section(content_layout)
         self._create_appearance_section(content_layout)
+        self._create_storage_section(content_layout)
         
         # Add spacer at the end
         content_layout.addStretch()
@@ -400,7 +403,6 @@ class Sidebar(QStackedWidget):
         # Add appearance controls
         self._add_theme_settings(appearance_layout)
         self._add_opacity_settings(appearance_layout)
-        self._add_corner_radius_settings(appearance_layout)
         self._add_font_size_settings(appearance_layout)
         
         # Add stretch
@@ -482,42 +484,6 @@ class Sidebar(QStackedWidget):
         layout.addWidget(opacity_widget)
         layout.addSpacing(8)
     
-    def _add_corner_radius_settings(self, layout: QVBoxLayout) -> None:
-        """Add corner radius settings."""
-        label = QLabel("Corner radius")
-        label.setStyleSheet(self._get_label_stylesheet())
-        layout.addWidget(label)
-        
-        radius_widget = QWidget()
-        radius_layout = QHBoxLayout(radius_widget)
-        radius_layout.setContentsMargins(0, 0, 0, 0)
-        radius_layout.setSpacing(8)
-        
-        self.radius_slider = QSlider(QtCore.Qt.Horizontal)
-        self.radius_slider.setMinimum(0)
-        self.radius_slider.setMaximum(20)
-        self.radius_slider.setValue(self.config.get_corner_radius())
-        self.radius_slider.setStyleSheet(self._get_slider_stylesheet())
-        self.radius_slider.setMaximumWidth(120)
-        
-        self.radius_spinbox = QSpinBox()
-        self.radius_spinbox.setMinimum(0)
-        self.radius_spinbox.setMaximum(20)
-        self.radius_spinbox.setSingleStep(1)
-        self.radius_spinbox.setValue(self.config.get_corner_radius())
-        self.radius_spinbox.setSuffix("px")
-        self.radius_spinbox.setStyleSheet(self._get_spinbox_stylesheet())
-        self.radius_spinbox.setMaximumWidth(70)
-        
-        self.radius_slider.valueChanged.connect(lambda v: self.radius_spinbox.setValue(v))
-        self.radius_spinbox.valueChanged.connect(lambda v: self.radius_slider.setValue(v))
-        
-        radius_layout.addWidget(self.radius_slider, 1)
-        radius_layout.addWidget(self.radius_spinbox)
-        
-        layout.addWidget(radius_widget)
-        layout.addSpacing(8)
-    
     def _add_font_size_settings(self, layout: QVBoxLayout) -> None:
         """Add font size settings."""
         label = QLabel("Font size for chat text")
@@ -556,6 +522,88 @@ class Sidebar(QStackedWidget):
         fontsize_layout.addStretch()
         
         layout.addWidget(fontsize_widget)
+        layout.addSpacing(8)
+    
+    def _create_storage_section(self, parent_layout: QVBoxLayout) -> None:
+        """Create the storage settings section.
+        
+        Args:
+            parent_layout: Parent layout to add section to
+        """
+        # Storage group box
+        storage_group = QGroupBox("Storage")
+        storage_group.setStyleSheet(f"""
+            QGroupBox {{
+                color: {self.colors['fg']};
+                font-size: 14px;
+                font-weight: bold;
+                border: 1px solid {self.colors['border']};
+                border-radius: 6px;
+                margin-top: 10px;
+                padding-top: 10px;
+            }}
+            QGroupBox::title {{
+                subcontrol-origin: margin;
+                left: 10px;
+                padding: 0 5px 0 5px;
+            }}
+        """)
+        
+        storage_layout = QVBoxLayout(storage_group)
+        storage_layout.setSpacing(12)
+        storage_layout.setContentsMargins(10, 15, 10, 10)
+        
+        # Add storage controls
+        self._add_stay_signed_in_settings(storage_layout)
+        self._add_sign_out_button(storage_layout)
+        
+        # Add stretch
+        storage_layout.addItem(QSpacerItem(20, 40, QSizePolicy.Minimum, QSizePolicy.Expanding))
+        
+        parent_layout.addWidget(storage_group)
+    
+    def _add_stay_signed_in_settings(self, layout: QVBoxLayout) -> None:
+        """Add stay signed in settings."""
+        label = QLabel("Session")
+        label.setStyleSheet(self._get_label_stylesheet())
+        layout.addWidget(label)
+        
+        self.chk_stay_signed_in = QCheckBox("Stay signed in")
+        self.chk_stay_signed_in.setStyleSheet(self._get_checkbox_stylesheet())
+        self.chk_stay_signed_in.setChecked(self.config.get_stay_signed_in())
+        layout.addWidget(self.chk_stay_signed_in)
+        
+        layout.addSpacing(8)
+    
+    def _add_sign_out_button(self, layout: QVBoxLayout) -> None:
+        """Add sign out button."""
+        label = QLabel("Account")
+        label.setStyleSheet(self._get_label_stylesheet())
+        layout.addWidget(label)
+        
+        self.btn_sign_out = QPushButton("Sign out")
+        self.btn_sign_out.setStyleSheet(f"""
+            QPushButton {{
+                color: {self.colors['fg']};
+                background-color: {self.colors['panel']};
+                border: 1px solid {self.colors['border']};
+                border-radius: 6px;
+                padding: 8px 16px;
+                font-size: 11px;
+                font-weight: bold;
+                text-align: left;
+            }}
+            QPushButton:hover {{
+                background-color: {self.colors['hover']};
+                border: 1px solid #d13438;
+            }}
+            QPushButton:pressed {{
+                background-color: {self.colors['pressed']};
+            }}
+        """)
+        self.btn_sign_out.clicked.connect(self._on_sign_out)
+        layout.addWidget(self.btn_sign_out)
+        
         layout.addSpacing(8)
     
     def _create_settings_footer(self) -> QFrame:
@@ -736,8 +784,10 @@ class Sidebar(QStackedWidget):
         # Appearance section
         self.theme_group.buttonClicked.connect(self._on_setting_changed)
         self.opacity_slider.valueChanged.connect(self._on_setting_changed)
-        self.radius_slider.valueChanged.connect(self._on_setting_changed)
         self.fontsize_group.buttonClicked.connect(self._on_setting_changed)
+        
+        # Storage section
+        self.chk_stay_signed_in.stateChanged.connect(self._on_setting_changed)
     
     def _on_setting_changed(self) -> None:
         """Enable Apply button when a setting is changed."""
@@ -763,7 +813,6 @@ class Sidebar(QStackedWidget):
             self.config.set_theme("dark")
         
         self.config.set_opacity(self.opacity_slider.value() / 100.0)
-        self.config.set_corner_radius(self.radius_spinbox.value())
         
         if self.radio_small.isChecked():
             self.config.set_font_size("small")
@@ -771,6 +820,9 @@ class Sidebar(QStackedWidget):
             self.config.set_font_size("medium")
         else:
             self.config.set_font_size("large")
+        
+        # Storage settings
+        self.config.set_stay_signed_in(self.chk_stay_signed_in.isChecked())
         
         # Emit signal with changed settings
         changed_settings = {
@@ -781,8 +833,8 @@ class Sidebar(QStackedWidget):
             'always_on_top': self.chk_always_on_top.isChecked(),
             'theme': self.config.get_theme(),
             'opacity': self.config.get_opacity(),
-            'corner_radius': self.config.get_corner_radius(),
             'font_size': self.config.get_font_size(),
+            'stay_signed_in': self.chk_stay_signed_in.isChecked(),
         }
         self.settings_changed.emit(changed_settings)
         
@@ -804,10 +856,18 @@ class Sidebar(QStackedWidget):
         # Appearance defaults
         self.radio_system.setChecked(True)
         self.opacity_slider.setValue(100)
-        self.radius_slider.setValue(0)
         self.radio_medium.setChecked(True)
+        
+        # Storage defaults
+        self.chk_stay_signed_in.setChecked(True)
         
         # Enable Apply button so user can save defaults
         self.btn_apply.setEnabled(True)
         logger.info("Default settings restored (click Apply to save)")
+    
+    def _on_sign_out(self) -> None:
+        """Handle sign out button click."""
+        # Emit signal to main window to sign out
+        self.settings_changed.emit({'sign_out': True})
+        logger.info("User requested to sign out")
 

@@ -289,13 +289,16 @@ class MainWindow(QWidget):
             self._set_autostart(autostart)
             logger.info(f"Applied autostart: {autostart}")
         
-        # Note: Theme, corner radius, edge, width, docked state, and always on top (when docked)
+        # Handle sign out
+        if 'sign_out' in settings and settings['sign_out']:
+            self._sign_out()
+            return  # Don't show other messages
+        
+        # Note: Theme, edge, width, docked state, and always on top (when docked)
         # typically require an app restart to fully apply
         requires_restart = []
         if 'theme' in settings:
             requires_restart.append('theme')
-        if 'corner_radius' in settings:
-            requires_restart.append('corner radius')
         if 'edge' in settings:
             # Check if edge changed from current window state
             current_edge = AppBarEdge.LEFT if self.edge_str == "left" else AppBarEdge.RIGHT
@@ -314,6 +317,31 @@ class MainWindow(QWidget):
             logger.info(restart_msg)
         else:
             self._show_toast("Settings applied successfully")
+    
+    def _sign_out(self) -> None:
+        """Sign out by clearing authentication cookies and reloading."""
+        try:
+            # Clear only authentication cookies to sign out
+            if self.engine and hasattr(self.engine, '_profile') and self.engine._profile:
+                profile = self.engine._profile
+                
+                # Clear all cookies (this signs the user out)
+                if hasattr(profile, 'cookieStore'):
+                    profile.cookieStore().deleteAllCookies()
+                    logger.info("Cleared authentication cookies")
+                
+                # Reload the page to show login screen
+                self.engine.navigate(DEFAULT_URL)
+                
+                self._show_toast("Signed out successfully", duration=2000)
+                logger.info("User signed out")
+            else:
+                self._show_toast("Failed to sign out", duration=3000)
+                logger.error("Web engine or profile not available")
+                
+        except Exception as e:
+            logger.error(f"Failed to sign out: {e}")
+            self._show_toast(f"Error signing out: {e}", duration=4000)
     
     def _set_autostart(self, enable: bool) -> None:
         """Enable or disable autostart via Windows registry.

@@ -227,25 +227,6 @@ class Config:
         """
         self.set("opacity", opacity)
     
-    def get_corner_radius(self, default: int = 0) -> int:
-        """Get the corner radius setting.
-        
-        Args:
-            default: Default corner radius in pixels
-            
-        Returns:
-            int: Corner radius value
-        """
-        return self.get("corner_radius", default, int)
-    
-    def set_corner_radius(self, radius: int) -> None:
-        """Set the corner radius setting.
-        
-        Args:
-            radius: Corner radius in pixels
-        """
-        self.set("corner_radius", radius)
-    
     def get_font_size(self, default: str = "medium") -> str:
         """Get the font size setting.
         
@@ -264,4 +245,27 @@ class Config:
             font_size: Font size ("small", "medium", or "large")
         """
         self.set("font_size", font_size)
+    
+    # -------------------------------------------------------------------------
+    # Storage settings
+    # -------------------------------------------------------------------------
+    
+    def get_stay_signed_in(self, default: bool = True) -> bool:
+        """Get the stay signed in setting.
+        
+        Args:
+            default: Default stay signed in state
+            
+        Returns:
+            bool: Whether to stay signed in
+        """
+        return self.get("stay_signed_in", default, bool)
+    
+    def set_stay_signed_in(self, stay_signed_in: bool) -> None:
+        """Set the stay signed in setting.
+        
+        Args:
+            stay_signed_in: Whether to stay signed in
+        """
+        self.set("stay_signed_in", stay_signed_in)
 
