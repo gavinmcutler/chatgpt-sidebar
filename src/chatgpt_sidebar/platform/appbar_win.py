@@ -81,6 +81,7 @@ class AppBarWin:
         self._registered = False
         self._edge = AppBarEdge.LEFT
         self._width = 420
+        self._last_rect = (0, 0, 420, 1080)  # Default rect
     
     def is_docked(self) -> bool:
         """Check if the AppBar is currently docked.
@@ -212,12 +213,15 @@ class AppBarWin:
         # Set position
         shell32.SHAppBarMessage(ctypes.c_uint(AppBarMessage.SETPOS), ctypes.byref(abd))
         
-        # Apply to window
+        # Apply to window using Windows API
         x, y = abd.rc.left, abd.rc.top
         w, h = abd.rc.right - abd.rc.left, abd.rc.bottom - abd.rc.top
         user32.MoveWindow(self._hwnd, x, y, w, h, True)
         
         logger.info(f"AppBar docked to edge {self._edge} at ({x}, {y}) with size {w}x{h}")
+        
+        # Also store the dimensions for Qt to use
+        self._last_rect = (x, y, w, h)
     
     def get_opposite_work_area(self) -> Tuple[int, int, int, int]:
         """Get the work area rectangle opposite to the docked AppBar.
@@ -241,6 +245,14 @@ class AppBarWin:
         else:
             # Left side
             return (monitor[0], monitor[1], appbar[0], monitor[3])
+    
+    def get_last_rect(self) -> Tuple[int, int, int, int]:
+        """Get the last docked rectangle.
+        
+        Returns:
+            Tuple[int, int, int, int]: Rectangle (x, y, width, height)
+        """
+        return self._last_rect
     
     @property
     def callback_msg(self) -> int:

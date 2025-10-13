@@ -1,7 +1,8 @@
 """QtWebEngine-based web engine implementation."""
 
-from typing import Callable, Optional
+from typing import Callable, Optional, Dict
 from PySide6.QtCore import QUrl
+from PySide6.QtGui import QColor
 from PySide6.QtWebEngineCore import QWebEnginePage, QWebEngineProfile
 from PySide6.QtWebEngineWidgets import QWebEngineView
 
@@ -15,13 +16,15 @@ logger = get_logger(__name__)
 class QtWebEngine:
     """QtWebEngine-based web engine implementation."""
     
-    def __init__(self, parent=None) -> None:
+    def __init__(self, parent=None, colors: Optional[Dict[str, str]] = None) -> None:
         """Initialize the web engine.
         
         Args:
             parent: Parent widget (optional)
+            colors: Theme colors dictionary (optional, used to prevent white flash)
         """
         self._parent = parent
+        self._colors = colors or {'bg': '#1a1a1a'}  # Default to dark background
         self._web_view: Optional[QWebEngineView] = None
         self._profile: Optional[QWebEngineProfile] = None
         self._create_web_view()
@@ -50,6 +53,15 @@ class QtWebEngine:
             self._web_view = QWebEngineView(self._parent)
             page = QWebEnginePage(self._profile, self._web_view)
             self._web_view.setPage(page)
+            
+            # Set background color to prevent white flash during loading
+            bg_color = self._colors.get('bg', '#1a1a1a')
+            self._web_view.setStyleSheet(f"QWebEngineView {{ background-color: {bg_color}; }}")
+            
+            # Set page background color as well
+            page.setBackgroundColor(QColor(bg_color))
+            
+            logger.info(f"Web view background set to {bg_color}")
             
         except Exception as e:
             logger.error(f"Failed to create web view: {e}")
@@ -88,7 +100,7 @@ class QtWebEngine:
             self._web_view.setZoomFactor(factor)
             logger.info(f"Zoom factor set to {factor}")
     
-    def get_widget(self):
+    def get_widget(self) -> QWebEngineView:
         """Get the underlying widget for embedding.
         
         Returns:

@@ -6,6 +6,11 @@ from PySide6 import QtCore, QtGui
 from PySide6.QtWidgets import QApplication, QStyle
 from PySide6.QtGui import QPalette, QIcon
 
+from ..constants import (
+    BUTTON_SIZE_PX,
+    BUTTON_PADDING_PX,
+)
+
 
 logger = logging.getLogger(__name__)
 
@@ -96,11 +101,11 @@ class ThemeManager:
                 background-color: transparent;
                 border: none;
                 border-radius: 4px;
-                padding: 4px;
-                min-width: 22px;
-                min-height: 22px;
-                max-width: 26px;
-                max-height: 26px;
+                padding: {BUTTON_PADDING_PX}px;
+                min-width: {BUTTON_SIZE_PX - 4}px;
+                min-height: {BUTTON_SIZE_PX - 4}px;
+                max-width: {BUTTON_SIZE_PX}px;
+                max-height: {BUTTON_SIZE_PX}px;
                 outline: none;
             }}
             QPushButton:hover {{

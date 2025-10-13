@@ -2,36 +2,29 @@
 
 import ctypes
 import sys
-import winreg
 from typing import Optional, Set, Tuple
 from PySide6 import QtCore, QtGui
 from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import QWidget, QVBoxLayout, QLabel, QApplication
 from PySide6.QtGui import QGuiApplication
 
+from .constants import (
+    DEFAULT_WIDTH,
+    DEFAULT_URL,
+    DEFAULT_TITLE,
+    TOAST_DURATION_MS,
+    SCREENSHOT_TOAST_DURATION_MS,
+    WEB_ENGINE_INIT_DELAY_MS,
+)
 from .ui.topbar import TopBar
 from .ui.sidebar import Sidebar
 from .ui.theme import ThemeManager
 from .platform.appbar_win import AppBarWin, AppBarEdge, AppBarNotification
-from .web.engine_qtwebengine import QtWebEngine
 from .settings.config import Config
-from .features.screenshot import (
-    find_visible_window_in_rect, capture_window_to_qimage,
-    qimage_to_png_base64, hide_window, show_window
-)
-from .features.paste_js import build_paste_js
 from .utils.logging import get_logger
 
 
 logger = get_logger(__name__)
-
-
-# Constants
-DEFAULT_WIDTH = 420
-DEFAULT_URL = "https://chat.openai.com/"
-DEFAULT_TITLE = "ChatGPT Sidebar"
-TOAST_DURATION = 3000
-SCREENSHOT_TOAST_DURATION = 1500
 
 
 class MainWindow(QWidget):
@@ -65,6 +58,8 @@ class MainWindow(QWidget):
         width_percent = self.config.get_width_percent()
         self.desired_width = int(screen.width() * width_percent / 100)
         
+        logger.info(f"Calculated desired width: {self.desired_width}px ({width_percent}% of {screen.width()}px screen)")
+        
         self.edge_str = "left" if self.config.get_edge() == AppBarEdge.LEFT else "right"
         self.is_docked = self.config.is_docked()
         
@@ -94,12 +89,18 @@ class MainWindow(QWidget):
         self.topbar = TopBar(self.colors, self)
         self.main_layout.addWidget(self.topbar)
         
-        # Create web engine
-        self.engine = QtWebEngine(self)
-        self.engine.navigate(url)
+        # Placeholder for web engine (initialized later)
+        self.engine = None
+        self._url = url
         
-        # Create sidebar (stacked widget with webview and settings)
-        self.sidebar = Sidebar(self.engine.get_widget(), self.colors, self.icons, self.config, self)
+        # Create sidebar with placeholder widget (web engine added later)
+        from PySide6.QtWidgets import QSizePolicy
+        self._sidebar_placeholder = QLabel("Loading...", self)
+        self._sidebar_placeholder.setAlignment(QtCore.Qt.AlignCenter)
+        self._sidebar_placeholder.setStyleSheet(f"QLabel {{ color: {self.colors['fg']}; background-color: {self.colors['bg']}; font-size: 14px; }}")
+        self._sidebar_placeholder.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        
+        self.sidebar = Sidebar(self._sidebar_placeholder, self.colors, self.icons, self.config, self)
         self.main_layout.addWidget(self.sidebar, 1)
         
         # Connect topbar signals
@@ -128,35 +129,127 @@ class MainWindow(QWidget):
         self._drag = False
         self._drag_pos = QtCore.QPoint()
         
+        # Flag to enforce fixed width in docked mode
+        self._enforce_fixed_width = False
+        
         # Register AppBar after window is shown
         if self.is_docked:
             QTimer.singleShot(0, self._register_appbar)
         else:
             QTimer.singleShot(0, self._start_undocked)
+        
+        # Defer web engine initialization to speed up UI appearance
+        QTimer.singleShot(WEB_ENGINE_INIT_DELAY_MS, self._init_web_engine)
+    
+    def _init_web_engine(self) -> None:
+        """Initialize web engine after UI is shown (deferred for fast startup)."""
+        from .web.engine_qtwebengine import QtWebEngine
+        
+        logger.info("Initializing web engine...")
+        
+        # Create web engine with theme colors to prevent white flash
+        self.engine = QtWebEngine(self, colors=self.colors)
+        self.engine.navigate(self._url)
+        
+        # Replace placeholder with actual web view
+        web_widget = self.engine.get_widget()
+        
+        # Ensure web widget has proper size policy to fill available space
+        from PySide6.QtWidgets import QSizePolicy
+        web_widget.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        
+        # Prevent web widget from having a minimum size that could interfere
+        web_widget.setMinimumSize(0, 0)
+        
+        # Remove placeholder
+        old_widget = self.sidebar.widget(0)
+        self.sidebar.removeWidget(old_widget)
+        old_widget.deleteLater()
+        
+        # Insert web widget at the same position
+        self.sidebar.insertWidget(0, web_widget)
+        self.sidebar.setCurrentIndex(0)
+        
+        # Force layout update
+        self.main_layout.update()
+        
+        # In docked mode, let AppBar handle positioning (don't restore geometry)
+        # In undocked mode, window position/size should already be correct
+        if self.is_docked and self.appbar:
+            # Re-dock to ensure window stays at edge with correct dimensions
+            self.appbar.reposition()
+            logger.info("AppBar repositioned after web engine load")
+        
+        # Process events to ensure layout is complete
+        QApplication.processEvents()
+        
+        # Apply zoom settings
+        zoom = self.config.get_zoom()
+        self.engine.set_zoom(zoom)
+        
+        # Monitor for size changes after page load and enforce correct size
+        if self.is_docked and self.appbar:
+            # Connect to page load finished signal to enforce size
+            if self.engine.get_page():
+                self.engine.get_page().loadFinished.connect(self._on_page_load_finished)
+            
+            # Also use timers as backup (in case multiple loads happen)
+            QTimer.singleShot(500, self._enforce_appbar_size)
+            QTimer.singleShot(1500, self._enforce_appbar_size)
+        
+        logger.info("Web engine initialized")
+    
+    def _on_page_load_finished(self, ok: bool) -> None:
+        """Handle page load finished event.
+        
+        Args:
+            ok: Whether the page loaded successfully
+        """
+        if ok and self.is_docked and self.appbar:
+            # Delay slightly to let any size changes from the page settle
+            QTimer.singleShot(100, self._enforce_appbar_size)
+    
+    def _enforce_appbar_size(self) -> None:
+        """Enforce the correct AppBar size (used after web content loads)."""
+        if self.is_docked and self.appbar:
+            logger.info(f"Enforcing AppBar size: {self.desired_width}px")
+            self.appbar.reposition()
+            
+            # Also use Qt's geometry methods to ensure the window is properly sized
+            x, y, w, h = self.appbar.get_last_rect()
+            self.setGeometry(x, y, w, h)
+            
+            # Log current window size for debugging
+            current_size = self.size()
+            logger.info(f"Current window size after enforcement: {current_size.width()}x{current_size.height()}")
     
     def _apply_initial_settings(self) -> None:
         """Apply saved appearance settings on startup.
         
         Applies settings that can be changed without restart:
         - Window opacity
-        - Web content zoom (font size)
+        - Web content zoom (font size) - applied when engine loads
         """
         # Apply opacity
         opacity = self.config.get_opacity()
         self.setWindowOpacity(opacity)
         
-        # Apply zoom (from saved zoom or font size)
-        zoom = self.config.get_zoom()
-        self.engine.set_zoom(zoom)
-        
-        logger.info(f"Applied initial settings: opacity={opacity}, zoom={zoom}")
+        logger.info(f"Applied initial settings: opacity={opacity}")
     
     def _register_appbar(self) -> None:
         """Register the window as an AppBar."""
         hwnd = int(self.winId())
         self.appbar = AppBarWin(hwnd, self._callback_msg)
         self.appbar.dock(self.edge_str, self.desired_width)
-        logger.info("AppBar registered and docked")
+        logger.info(f"AppBar registered and docked with width: {self.desired_width}px")
+        
+        # Apply the geometry to Qt as well
+        x, y, w, h = self.appbar.get_last_rect()
+        self.setGeometry(x, y, w, h)
+        logger.info(f"Qt window geometry set to: ({x}, {y}) {w}x{h}")
+        
+        # Store the desired size to prevent unwanted resizing
+        self._enforce_fixed_width = True
     
     def _start_undocked(self) -> None:
         """Start in undocked mode."""
@@ -188,6 +281,13 @@ class MainWindow(QWidget):
     # Event handlers
     def on_screenshot_to_chat(self) -> None:
         """Capture screenshot and paste into chat."""
+        # Lazy import screenshot features (only loaded when used)
+        from .features.screenshot import (
+            find_visible_window_in_rect, capture_window_to_qimage,
+            qimage_to_png_base64, hide_window, show_window
+        )
+        from .features.paste_js import build_paste_js
+        
         logger.info("Screenshot button clicked")
         try:
             if not self.appbar:
@@ -234,7 +334,7 @@ class MainWindow(QWidget):
         if not ok:
             self._show_toast("Couldn't paste into the chat. Click the message box and retry.")
         else:
-            self._show_toast("Screenshot attached.", duration_ms=SCREENSHOT_TOAST_DURATION)
+            self._show_toast("Screenshot attached.", duration_ms=SCREENSHOT_TOAST_DURATION_MS)
     
     def on_show_settings(self) -> None:
         """Show settings view."""
@@ -264,7 +364,8 @@ class MainWindow(QWidget):
             }
             zoom = zoom_map.get(font_size, 1.0)
             self.config.set_zoom(zoom)
-            self.engine.set_zoom(zoom)
+            if self.engine:  # Only apply if engine is initialized
+                self.engine.set_zoom(zoom)
             logger.info(f"Applied font size: {font_size} (zoom: {zoom})")
         
         # Apply always on top changes
@@ -349,6 +450,9 @@ class MainWindow(QWidget):
         Args:
             enable: Whether to enable autostart
         """
+        # Lazy import winreg (only needed for autostart feature)
+        import winreg
+        
         try:
             key_path = r"Software\Microsoft\Windows\CurrentVersion\Run"
             key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, key_path, 0, winreg.KEY_SET_VALUE)
@@ -412,6 +516,7 @@ class MainWindow(QWidget):
             self.appbar = None
         
         self.is_docked = False
+        self._enforce_fixed_width = False
         self.setWindowFlags(QtCore.Qt.Window)
         self.setAttribute(QtCore.Qt.WA_TranslucentBackground, False)
         
@@ -455,6 +560,8 @@ class MainWindow(QWidget):
         self.appbar = AppBarWin(hwnd, self._callback_msg)
         self.appbar.dock(self.edge_str, self.desired_width)
         self.is_docked = True
+        self._enforce_fixed_width = True
+        logger.info(f"Re-docked with width: {self.desired_width}px")
         
         # Refresh webview
         def refresh_webview():
@@ -479,7 +586,7 @@ class MainWindow(QWidget):
         pass
     
     # Toast notifications
-    def _show_toast(self, message: str, duration_ms: int = TOAST_DURATION) -> None:
+    def _show_toast(self, message: str, duration_ms: int = TOAST_DURATION_MS) -> None:
         """Show a toast message."""
         if self._toast_label:
             self._toast_label.deleteLater()
@@ -550,6 +657,20 @@ class MainWindow(QWidget):
                 self.appbar.reposition()
         
         return False, 0
+    
+    # Resize event handler to prevent unwanted resizing in docked mode
+    def resizeEvent(self, e: QtGui.QResizeEvent) -> None:
+        """Handle resize event.
+        
+        Args:
+            e: Resize event
+        """
+        super().resizeEvent(e)
+        
+        # If in docked mode and we're enforcing fixed width, reposition to correct size
+        if self.is_docked and self._enforce_fixed_width and self.appbar:
+            # Use a short timer to avoid recursion and let the resize settle
+            QTimer.singleShot(50, self._enforce_appbar_size)
     
     # Close event
     def closeEvent(self, e: QtGui.QCloseEvent) -> None:

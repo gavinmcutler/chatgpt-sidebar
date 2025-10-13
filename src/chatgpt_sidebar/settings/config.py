@@ -3,11 +3,13 @@
 from typing import Any, Optional
 from PySide6.QtCore import QSettings
 
+from ..constants import APP_ORGANIZATION, APP_NAME
+
 
 class Config:
     """Wrapper around QSettings for managing application configuration."""
     
-    def __init__(self, organization: str = "ChatGPTSidebar", application: str = "App") -> None:
+    def __init__(self, organization: str = APP_ORGANIZATION, application: str = APP_NAME) -> None:
         """Initialize the configuration manager.
         
         Args:

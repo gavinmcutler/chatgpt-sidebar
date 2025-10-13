@@ -1,11 +1,10 @@
 """Application bootstrap and main entry point."""
 
 import sys
-import signal
-import argparse
 from PySide6.QtWidgets import QApplication, QMessageBox
 
-from .main_window import MainWindow, DEFAULT_WIDTH, DEFAULT_URL
+from .constants import DEFAULT_WIDTH, DEFAULT_URL
+from .main_window import MainWindow
 from .utils.logging import setup_logging, get_logger
 
 
@@ -18,6 +17,9 @@ def main() -> None:
     if sys.platform != "win32":
         print("This application requires Windows.")
         sys.exit(1)
+    
+    # Lazy import argparse (only needed at startup, not for module load)
+    import argparse
     
     # Parse command line arguments
     parser = argparse.ArgumentParser(description="ChatGPT Sidebar - Windows sidebar for ChatGPT")
@@ -44,6 +46,9 @@ def main() -> None:
     
     # Create QApplication
     app = QApplication(sys.argv)
+    
+    # Lazy import signal (only needed for signal handlers)
+    import signal
     
     # Set up signal handlers for graceful shutdown
     def signal_handler(signum, frame):

@@ -1,15 +1,29 @@
 """Top control bar UI component."""
 
-from typing import Dict
+from typing import Dict, Optional
 from PySide6.QtCore import Signal
-from PySide6.QtWidgets import QFrame, QHBoxLayout, QPushButton
+from PySide6.QtWidgets import QFrame, QHBoxLayout, QPushButton, QWidget
 from PySide6.QtGui import QIcon
 
+from ..constants import (
+    TOPBAR_HEIGHT_PX,
+    BUTTON_PADDING_PX,
+    BUTTON_SPACING_PX,
+    LAYOUT_MARGIN_PX,
+)
 from .theme import ThemeManager
 
 
 class TopBar(QFrame):
-    """Top control bar with navigation and action buttons."""
+    """Top control bar with navigation and action buttons.
+    
+    Provides a horizontal bar with control buttons for:
+    - Screenshot capture
+    - Settings panel
+    - Side toggle (left/right)
+    - Dock/undock toggle
+    - Exit application
+    """
     
     # Signals
     screenshot_clicked = Signal()
@@ -18,7 +32,7 @@ class TopBar(QFrame):
     toggle_dock_clicked = Signal()
     exit_clicked = Signal()
     
-    def __init__(self, colors: Dict[str, str], parent=None) -> None:
+    def __init__(self, colors: Dict[str, str], parent: Optional[QWidget] = None) -> None:
         """Initialize the top control bar.
         
         Args:
@@ -31,13 +45,13 @@ class TopBar(QFrame):
         
         # Configure frame
         self.setFrameShape(QFrame.NoFrame)
-        self.setFixedHeight(34)
+        self.setFixedHeight(TOPBAR_HEIGHT_PX)
         self.setStyleSheet(ThemeManager.create_control_bar_stylesheet(colors))
         
         # Create layout
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(6, 4, 6, 4)
-        layout.setSpacing(4)
+        layout.setContentsMargins(LAYOUT_MARGIN_PX, BUTTON_PADDING_PX, LAYOUT_MARGIN_PX, BUTTON_PADDING_PX)
+        layout.setSpacing(BUTTON_SPACING_PX)
         
         # Create buttons
         self.btn_screenshot = QPushButton()

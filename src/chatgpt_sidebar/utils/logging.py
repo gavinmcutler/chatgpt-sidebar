@@ -3,6 +3,8 @@
 import logging
 from typing import Optional
 
+from ..constants import LOG_FILE_NAME
+
 
 logger = logging.getLogger(__name__)
 
@@ -15,7 +17,7 @@ def setup_logging(enable_logging: bool = False, log_file: Optional[str] = None) 
         log_file: Path to log file (defaults to 'chatgpt_sidebar.log')
     """
     if log_file is None:
-        log_file = 'chatgpt_sidebar.log'
+        log_file = LOG_FILE_NAME
     
     if enable_logging:
         logging.basicConfig(
