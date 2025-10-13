@@ -238,18 +238,23 @@ class MainWindow(QWidget):
     
     def _register_appbar(self) -> None:
         """Register the window as an AppBar."""
+        # We need a valid hwnd to register AppBar, but we can get it without showing
+        # the window by using winId() which creates the native window handle
         hwnd = int(self.winId())
         self.appbar = AppBarWin(hwnd, self._callback_msg)
         self.appbar.dock(self.edge_str, self.desired_width)
         logger.info(f"AppBar registered and docked with width: {self.desired_width}px")
         
-        # Apply the geometry to Qt as well
+        # Apply the geometry to Qt BEFORE showing to avoid flicker
         x, y, w, h = self.appbar.get_last_rect()
         self.setGeometry(x, y, w, h)
         logger.info(f"Qt window geometry set to: ({x}, {y}) {w}x{h}")
         
         # Store the desired size to prevent unwanted resizing
         self._enforce_fixed_width = True
+        
+        # Now show the window at the correct position
+        self.show()
     
     def _start_undocked(self) -> None:
         """Start in undocked mode."""
@@ -494,7 +499,33 @@ class MainWindow(QWidget):
         self._update_topbar_buttons()
         
         if self.is_docked and self.appbar:
+            # When switching sides while docked, we need to undock and redock
+            # Windows AppBar requires REMOVE then NEW messages to change edges
+            
+            # Disable updates during transition to reduce flickering
+            self.setUpdatesEnabled(False)
+            
+            # Undock from current side
+            self.appbar.undock()
+            self.appbar = None
+            
+            # Process events to ensure undock completes
+            QApplication.processEvents()
+            
+            # Re-create and register AppBar with new edge
+            hwnd = int(self.winId())
+            self.appbar = AppBarWin(hwnd, self._callback_msg)
             self.appbar.dock(self.edge_str, self.desired_width)
+            
+            # Apply the new geometry to Qt
+            x, y, w, h = self.appbar.get_last_rect()
+            self.setGeometry(x, y, w, h)
+            
+            # Re-enable updates and force repaint
+            self.setUpdatesEnabled(True)
+            self.update()
+            
+            logger.info(f"Switched to {self.edge_str} side at ({x}, {y}) {w}x{h}")
     
     def on_toggle_dock(self) -> None:
         """Toggle between docked and undocked state."""

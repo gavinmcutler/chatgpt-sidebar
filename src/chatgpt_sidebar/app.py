@@ -61,14 +61,11 @@ def main() -> None:
     
     try:
         # Create main window
+        # Note: MainWindow handles its own show() after proper initialization
         window = MainWindow(
             desired_width=args.width,
             url=args.url
         )
-        
-        # Show if starting in docked mode (undocked mode handles its own show)
-        if window.is_docked:
-            window.show()
         
         logger.info("Application started successfully")
         
